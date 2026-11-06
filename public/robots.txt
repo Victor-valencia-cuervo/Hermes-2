@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /$
+Allow: /manifest.webmanifest
+Allow: /icon/
+Allow: /pets/
+Allow: /caritas/
+Disallow: /app
+Disallow: /api/
+
+Sitemap: https://hermes06.pages.dev/sitemap.xml

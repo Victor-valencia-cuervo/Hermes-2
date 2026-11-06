@@ -1,0 +1,41 @@
+{
+  "id": "/",
+  "name": "Hermes – Panel personal",
+  "short_name": "Hermes",
+  "description": "Tu panel personal con clima, música, radios, recordatorios, notas y atajos.",
+  "lang": "es",
+  "dir": "ltr",
+  "categories": ["lifestyle", "productivity", "music", "weather"],
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon/hermes-icon.png",
+      "sizes": "500x500",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon/hermes-icon.png",
+      "sizes": "500x500",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon/Roxy-img-white.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

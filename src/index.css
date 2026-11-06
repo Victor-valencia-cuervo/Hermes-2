@@ -1,0 +1,295 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f4f4f5; --s: #ffffff; --s2: #f0f0f3; --t: #09090b; --m: #6b6b76;
+  --bd: rgba(0,0,0,.09); --a: #6366f1; color-scheme: light;
+}
+[data-theme="dark"] {
+  --bg: #09090b; --s: #18181b; --s2: #222228; --t: #fafafa; --m: #a1a1aa;
+  --bd: rgba(255,255,255,.09); color-scheme: dark;
+}
+html, body, #root { height: 100%; }
+/* Sin líneas de scroll visibles en ningún lado (el desplazamiento sigue funcionando) */
+* { scrollbar-width: none !important; -ms-overflow-style: none !important; }
+*::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
+body {
+  margin: 0; background: var(--bg); color: var(--t);
+  font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 500; font-size: 1.075rem; letter-spacing: .01em;
+  -webkit-font-smoothing: antialiased; transition: background .3s, color .3s;
+}
+input, select, textarea { font-family: inherit; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+.serif { font-family: 'Cormorant Garamond', Georgia, serif; }
+
+.card { background: var(--s); border: 1px solid var(--bd); border-radius: 1.5rem; padding: 1.25rem; }
+.glass { background: color-mix(in srgb, var(--s) 94%, transparent); backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4); border: 1px solid var(--bd); }
+/* Botón píldora cristal del Sonando */
+.glass-btn { background: color-mix(in srgb, var(--s) 62%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid var(--bd); color: var(--m); transition: transform .15s, color .2s; }
+.glass-btn:active { transform: scale(.94); }
+.inp { width: 100%; background: var(--s2); border: 1px solid var(--bd); border-radius: 1rem; padding: .75rem 1rem; font-size: 1rem; color: var(--t); outline: none; min-height: 44px; }
+.inp:focus { border-color: var(--a); }
+.inp:focus-visible { outline: 2px solid var(--a); outline-offset: 2px; border-color: var(--a); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; padding: .75rem 1.1rem; border-radius: 1rem; background: var(--a); color: #fff; font-size: .875rem; font-weight: 600; min-height: 44px; transition: opacity .2s, background-color .5s, transform .15s; }
+.btn:hover { opacity: .88; }
+.btn:active { transform: scale(.97); }
+.btn:focus-visible { outline: 2px solid var(--a); outline-offset: 2px; }
+.btn-o { background: transparent; color: var(--t); border: 1px solid var(--bd); }
+.btn-o:hover { background: var(--s2); opacity: 1; }
+.acc-soft { background: color-mix(in srgb, var(--a) 14%, transparent); color: var(--a); transition: background-color .5s, color .5s; }
+/* Botón icono: zona táctil mínima 40px (WCAG 2.5.8) sin cambiar el icono visual */
+.ico-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; min-height: 40px; padding: .4rem; border-radius: .75rem; color: var(--m); transition: color .2s, background .2s, transform .15s; }
+.ico-btn:hover { color: var(--t); background: var(--s2); }
+.ico-btn:active { transform: scale(.92); }
+.ico-btn:focus-visible { outline: 2px solid var(--a); outline-offset: 2px; color: var(--t); }
+.ico-btn:disabled { opacity: .38; cursor: default; }
+.ico-btn[aria-pressed="true"], .ico-btn.is-on { color: var(--a); background: color-mix(in srgb, var(--a) 14%, transparent); }
+/* Sliders: carril fino pero zona táctil alta para el pulgar */
+input[type="range"] { min-height: 28px; cursor: pointer; }
+input[type="range"]:focus-visible { outline: 2px solid var(--a); outline-offset: 4px; border-radius: 8px; }
+/* Skeleton shimmer para cargando (letras, listas) — evita texto parpadeante */
+@keyframes skshimmer { 0% { opacity: .55; } 50% { opacity: 1; } 100% { opacity: .55; } }
+.skel { border-radius: .75rem; background: var(--s2); animation: skshimmer 1.4s ease-in-out infinite; }
+/* Scroll horizontal de carruseles: mantiene scroll, muestra pista sutil en desktop */
+.scroll-x { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin !important; }
+.scroll-x::-webkit-scrollbar { display: block !important; height: 6px !important; }
+.scroll-x::-webkit-scrollbar-thumb { background: var(--bd); border-radius: 99px; }
+/* Contenedor de letra con altura estable: evita layout-shift al cambiar de línea */
+.lyrics-slot { min-height: 2.75rem; display: flex; align-items: center; justify-content: center; }
+/* Punto activo con texto además de color (no solo color para daltónicos) */
+.state-dot { width: 6px; height: 6px; border-radius: 99px; background: currentColor; display: inline-block; }
+
+@keyframes fin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.fin { animation: fin .35s ease-out; }
+/* Caritas en imagen: entrada con "pop", flotación, rebote con la música y respiración al dormir */
+@keyframes facepop { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: none; } }
+.face-pop { animation: facepop .35s ease-out; }
+@keyframes facefloat { 50% { transform: translateY(-3px); } }
+.face-float { animation: facefloat 5s ease-in-out infinite; }
+@keyframes facebop { 0%, 100% { transform: translateY(0) rotate(0); } 25% { transform: translateY(-5px) rotate(-2deg); } 75% { transform: translateY(-5px) rotate(2deg); } }
+.face-bop { animation: facebop .7s ease-in-out infinite; }
+@keyframes facesleep { 0%, 100% { transform: scale(1); opacity: .85; } 50% { transform: scale(1.04); opacity: 1; } }
+.face-sleep { animation: facesleep 4s ease-in-out infinite; }
+@keyframes sheet { from { opacity: 0; transform: translateY(48px); } to { opacity: 1; transform: none; } }
+.sheet { animation: sheet .3s ease-out; }
+@keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.035); } }
+.breathe { animation: breathe 4.5s ease-in-out infinite; }
+.lrc { transition: color .3s, opacity .3s; }
+@keyframes pls { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .animate-spin { animation-duration: 1.2s !important; animation-iteration-count: infinite !important; }
+  .vinyl-disc, .breathe, .face-float, .face-bop, .pet-a-music { animation: none !important; }
+}
+
+/* Categorías */
+.cat-btn { padding-bottom: .9rem; box-shadow: inset 0 0 0 1px rgba(255,255,255,.14), 0 6px 18px -8px rgba(0,0,0,.5); transition: transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .25s; }
+.cat-btn:hover { transform: translateY(-2px); }
+.cat-btn:active { transform: scale(.96); }
+.cat-glow { position: absolute; inset: 0; background: radial-gradient(120% 90% at 100% 0%, rgba(255,255,255,.28), transparent 55%), linear-gradient(to top, rgba(0,0,0,.35), transparent 60%); }
+.cat-play { opacity: .0; transform: translateY(4px); transition: opacity .25s, transform .25s; }
+.cat-btn:hover .cat-play, .cat-btn:focus-visible .cat-play { opacity: .9; transform: none; }
+@media (hover: none) { .cat-play { opacity: .75; transform: none; } }
+/* Transiciones suaves */
+@keyframes sheetout { to { opacity: 0; transform: translateY(60px) scale(.98); } }
+.sheet-out { animation: sheetout .26s ease-in forwards; }
+@keyframes modalin { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: none; } }
+.modal-in { animation: modalin .32s cubic-bezier(.2,.8,.2,1); }
+/* Sonando full: entrada suave + salida con escala (los 3 temas) */
+@keyframes playerin { from { opacity: 0; transform: translateY(48px) scale(.98); } to { opacity: 1; transform: none; } }
+.player-in { animation: playerin .3s ease-out; }
+@keyframes playerout { to { opacity: 0; transform: translateY(60px) scale(.97); } }
+.player-out { animation: playerout .26s ease-in forwards; }
+/* Minis (barra Spotify / flotante): aparecer y despedirse */
+@keyframes cardin { from { opacity: 0; transform: translateY(16px) scale(.96); } to { opacity: 1; transform: none; } }
+.card-in { animation: cardin .28s ease-out; }
+@keyframes cardout { to { opacity: 0; transform: translateY(16px) scale(.95); } }
+.card-out { animation: cardout .2s ease-in forwards; }
+.fin { animation-duration: .45s; animation-timing-function: cubic-bezier(.2,.8,.2,1); }
+
+/* ───────────── Mascotas flotantes ───────────── */
+.pet-layer { position: fixed; inset: 0; z-index: 35; pointer-events: none; overflow: hidden; }
+.pet-root { position: absolute; left: 0; top: 0; will-change: transform; pointer-events: none; }
+.pet-flip, .pet-a { width: 100%; height: 100%; }
+.pet-a { transform-origin: 50% 100%; }
+.pet-sprite { background-repeat: no-repeat; image-rendering: auto; user-select: none; -webkit-user-drag: none; }
+.pet-shadow { position: absolute; left: 50%; bottom: -2px; height: 8px; margin-left: calc(var(--pw, 0px) * -.5); border-radius: 50%; background: rgba(0,0,0,.28); filter: blur(2px); transform: translateX(-50%); transition: opacity .15s; }
+.pet-hit { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); pointer-events: auto; cursor: grab; touch-action: none; -webkit-tap-highlight-color: transparent; border-radius: 14px; }
+.pet-hit:active { cursor: grabbing; }
+
+@keyframes petbreathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.015, 1.035); } }
+@keyframes pethop { 0%, 100% { transform: translateY(0) scale(1.03, .97); } 50% { transform: translateY(-4px) scale(.98, 1.03); } }
+@keyframes pethop2 { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-9px) rotate(2deg); } }
+@keyframes petbop { 0%, 100% { transform: translateY(0) rotate(-3deg); } 25% { transform: translateY(-6px) rotate(0); } 50% { transform: translateY(0) rotate(3deg); } 75% { transform: translateY(-6px) rotate(0); } }
+@keyframes petjump { 0% { transform: scale(1.08, .9); } 25% { transform: translateY(-30px) scale(.94, 1.08); } 55% { transform: translateY(-34px) scale(1, 1); } 85% { transform: translateY(0) scale(1.08, .9); } 100% { transform: none; } }
+@keyframes petshake { 0%, 100% { transform: translateX(-2px) rotate(-2deg); } 50% { transform: translateX(2px) rotate(2deg); } }
+@keyframes petlove { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05) translateY(-2px); } }
+@keyframes petsleep { 0%, 100% { transform: scale(1, .97); } 50% { transform: scale(1, 1.02); } }
+@keyframes petshiver { 0%, 100% { transform: translateX(-1px); } 50% { transform: translateX(1px); } }
+@keyframes petwobble { 0%, 100% { transform: rotate(-2deg); } 50% { transform: rotate(2deg) translateY(-1px); } }
+@keyframes petdrag { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(7deg); } }
+@keyframes petland { 0% { transform: scale(1.14, .82); } 60% { transform: scale(.96, 1.06); } 100% { transform: none; } }
+@keyframes petfloat { 0%, 100% { translate: 0 0; } 50% { translate: 0 -7px; } }
+.pet-a-idle, .pet-a-rain { animation: petbreathe 3.2s ease-in-out infinite; }
+.pet-a-walk { animation: pethop .42s ease-in-out infinite; }
+.pet-a-run { animation: pethop2 .26s ease-in-out infinite; }
+.pet-a-music { animation: petbop .6s ease-in-out infinite; }
+.pet-a-jump { animation: petjump .95s ease-out 1; }
+.pet-a-alert { animation: petshake .16s linear infinite; }
+.pet-a-love, .pet-a-wave { animation: petlove 1.2s ease-in-out infinite; }
+.pet-a-sleep { animation: petsleep 4.5s ease-in-out infinite; }
+.pet-a-cold { animation: petshiver .12s linear infinite; }
+.pet-a-hot { animation: petwobble .5s ease-in-out infinite; }
+.pet-a-drag, .pet-a-fall { animation: petdrag .35s ease-in-out infinite; }
+.pet-a-land { animation: petland .3s ease-out 1; }
+.pet-a-floaty { animation-name: petbreathe, petfloat; animation-duration: 3.2s, 3.4s; animation-iteration-count: infinite, infinite; animation-timing-function: ease-in-out, ease-in-out; }
+.pet-a-walk.pet-a-floaty, .pet-a-run.pet-a-floaty { animation-name: petfloat; animation-duration: 1.6s; }
+
+/* Globo de texto */
+@keyframes petpop { from { opacity: 0; transform: translateX(calc(-50% + var(--dx, 0px))) translateY(6px) scale(.88); } to { opacity: 1; transform: translateX(calc(-50% + var(--dx, 0px))) scale(1); } }
+.pet-bubble { position: absolute; left: 50%; bottom: calc(100% + 2px); width: max-content; max-width: min(210px, 70vw); padding: 7px 11px; border-radius: 14px; font-size: 13px; line-height: 1.25; text-align: center; background: var(--s); color: var(--t); border: 1px solid var(--bd); box-shadow: 0 8px 22px -8px rgba(0,0,0,.45); transform: translateX(calc(-50% + var(--dx, 0px))); animation: petpop .22s ease-out; pointer-events: none; }
+.pet-bubble::after { content: ''; position: absolute; left: calc(50% - var(--dx, 0px)); bottom: -5px; width: 9px; height: 9px; background: inherit; border-right: 1px solid var(--bd); border-bottom: 1px solid var(--bd); transform: translateX(-50%) rotate(45deg); }
+.pet-bubble.below { bottom: auto; top: calc(100% + 2px); }
+.pet-bubble.below::after { bottom: auto; top: -5px; transform: translateX(-50%) rotate(225deg); }
+
+/* Nubecita de lluvia */
+@keyframes petdrop { 0% { transform: translateY(0); opacity: 0; } 20% { opacity: .9; } 100% { transform: translateY(26px); opacity: 0; } }
+.pet-rain { position: absolute; left: 50%; width: 46px; height: 14px; margin-left: -23px; pointer-events: none; }
+.pet-cloud { position: absolute; inset: 0; border-radius: 99px; background: #cbd5e1; box-shadow: 8px -6px 0 -2px #cbd5e1, -8px -4px 0 -3px #cbd5e1; opacity: .95; }
+.pet-rain i { position: absolute; top: 12px; width: 2px; height: 7px; border-radius: 2px; background: #60a5fa; animation: petdrop .8s linear infinite; }
+/* ───────────── Pantalla Zen (solo videos + mascotas) ───────────── */
+.zen-wrap { cursor: default; }
+.zen-wrap.zen-hide { cursor: none; }
+.zen-video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+.zen-ui { transition: opacity .4s ease, transform .4s ease; }
+.zen-ui-on { opacity: 1; transform: none; pointer-events: auto; }
+.zen-ui-off { opacity: 0; transform: translateY(6px); pointer-events: none; }
+.zen-btn { display: inline-flex; align-items: center; justify-content: center; width: 2.75rem; height: 2.75rem; border-radius: 999px; color: #fafafa; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.18); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: transform .15s, background .2s; }
+.zen-btn:active { transform: scale(.92); }
+.zen-strip { display: flex; gap: .5rem; max-width: 100%; overflow-x: auto; padding: .5rem; border-radius: 1rem; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.14); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.zen-thumb { flex: 0 0 auto; width: 4.5rem; height: 4.5rem; border-radius: .75rem; overflow: hidden; border: 2px solid transparent; opacity: .65; transition: opacity .2s, border-color .2s, transform .15s; padding: 0; }
+.zen-thumb:active { transform: scale(.94); }
+.zen-thumb video { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.zen-thumb-on { border-color: #fff; opacity: 1; }
+@keyframes petspin { 0% { transform: rotate(0); } 50% { transform: rotate(14deg) translateY(-3px); } 100% { transform: rotate(-14deg); } }
+.pet-a-toss { animation: petspin .5s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .pet-bubble { animation: none !important; } }
+.pet-a-trick { animation: petshake .3s linear infinite; }
+/* Diagnóstico ?petdebug=1: etiqueta tiny sobre la mascota */
+.pet-debug { position: absolute; bottom: calc(100% + 2px); left: 0; font-size: 10px; line-height: 1.2; white-space: nowrap; background: rgba(0,0,0,.8); color: #4ade80; font-family: monospace; padding: 2px 6px; border-radius: 6px; pointer-events: none; z-index: 5; }
+
+/* ───────────── Disco de vinilo del Sonando (horizontal) ───────────── */
+@keyframes vinylspin { to { transform: rotate(360deg); } }
+.vinyl-disc { position: relative; width: 100%; height: 100%; border-radius: 999px; border: 3px solid rgba(255,255,255,.12);
+  background: repeating-radial-gradient(circle at center, #161316 0 2px, #060505 2px 4px);
+  box-shadow: 0 25px 60px rgba(0,0,0,.55); will-change: transform; }
+.vinyl-sheen { position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: conic-gradient(from 45deg, transparent 0deg, rgba(255,255,255,.14) 45deg, transparent 90deg, transparent 180deg, rgba(255,255,255,.14) 225deg, transparent 270deg); }
+.vinyl-label { position: absolute; inset: 31%; border-radius: 999px; overflow: hidden; border: 3px solid rgba(0,0,0,.7); box-shadow: 0 4px 14px rgba(0,0,0,.6); background: #222; }
+.vinyl-label img { width: 100%; height: 100%; object-fit: cover; }
+.vinyl-spindle { position: absolute; left: 50%; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 999px; background: #0a0a0a; border: 2px solid rgba(255,255,255,.25); }
+.vinyl-arm { position: absolute; top: -5%; right: -1%; width: 22%; height: 80%; transform-origin: 80% 6%; transition: transform 1s cubic-bezier(.2,.8,.2,1); pointer-events: none; }
+.vinyl-arm-base { position: absolute; top: 0; right: 0; width: 36%; aspect-ratio: 1; border-radius: 999px; background: linear-gradient(135deg,#3a3a40,#141416); border: 2px solid; box-shadow: 0 6px 16px rgba(0,0,0,.5); }
+.vinyl-arm-rod { position: absolute; top: 9%; right: 15%; width: 5%; height: 68%; border-radius: 99px; background: linear-gradient(90deg,#e5e5e5,#9a9aa0); box-shadow: 0 2px 6px rgba(0,0,0,.5); }
+.vinyl-arm-head { position: absolute; bottom: 3%; right: 7%; width: 17%; height: 12%; border-radius: 4px; background: #17171a; border: 1px solid rgba(255,255,255,.15); display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10%; }
+.vinyl-arm-tip { width: 30%; height: 36%; border-radius: 99px; }
+
+/* ───────────── Metas de compra ───────────── */
+@keyframes goalshake {
+  0%, 100% { transform: translateX(0) rotate(0); }
+  20% { transform: translateX(-5px) rotate(-1deg); }
+  40% { transform: translateX(5px) rotate(1deg); }
+  60% { transform: translateX(-3px) rotate(-.6deg); }
+  80% { transform: translateX(3px) rotate(.6deg); }
+}
+.goal-done {
+  border-color: var(--a) !important;
+  background: color-mix(in srgb, var(--a) 10%, var(--s));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--a) 45%, transparent), 0 10px 28px -12px color-mix(in srgb, var(--a) 60%, transparent);
+  animation: goalshake .55s ease-in-out 2;
+}
+@media (prefers-reduced-motion: reduce) { .goal-done { animation: none !important; } }
+
+/* Trucos de mascotas */
+@keyframes sirenA { 0% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes sirenB { 0% { opacity: 0; } 50% { opacity: 1; } }
+.pet-a-special { animation: none; }
+@keyframes eq { from { transform: scaleY(.25); } to { transform: scaleY(1); } }
+
+/* ───────────── Parallax Sonando (Default / 02 / 03 + portadas) ───────────── */
+/* Overscan: escala base para que el translate nunca muestre bordes */
+.parallax-bg { --px: 0px; --py: 0px; transform: translate3d(var(--px), var(--py), 0) scale(1.18); will-change: transform; }
+.parallax-fg { --px: 0px; --py: 0px; transform: translate3d(var(--px), var(--py), 0) scale(1.1); will-change: transform; }
+.parallax-slow { transition: transform .12s linear; }
+/* Marco de arte unificado: llena sin bandas, recorte suave */
+.art-frame { position: relative; overflow: hidden; isolation: isolate; background: var(--s2); border: 1px solid var(--bd); }
+.art-frame img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; user-select: none; -webkit-user-drag: none; }
+.art-frame::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08), inset 0 -18px 30px -22px rgba(0,0,0,.45); }
+/* Skeleton pequeño para letra inline: 2 líneas, sin layout-shift */
+@keyframes lrcsk { 0%,100% { opacity: .5; } 50% { opacity: .9; } }
+.lrc-skel { display: flex; flex-direction: column; gap: 6px; align-items: center; width: 100%; }
+.lrc-skel i { display: block; height: 10px; border-radius: 99px; background: var(--s2); animation: lrcsk 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .parallax-bg, .parallax-fg { transform: none !important; }
+  .lrc-skel i { animation: none !important; }
+}
+
+/* Botones de la cabecera cuando flotan sobre la foto de artista/álbum */
+.immersive-btn { color: #fff; background: rgba(0,0,0,.38); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-radius: 9999px; }
+
+/* ───────────── Marquesina: texto largo que se desplaza de derecha a izquierda ───────────── */
+.mq { display: block; max-width: 100%; min-width: 0; overflow: hidden; white-space: nowrap; }
+.mq-track { display: inline-flex; will-change: transform; }
+.mq-txt { display: inline-block; white-space: nowrap; }
+.mq-run { -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 22px), transparent 100%); mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 22px), transparent 100%); }
+.mq-run .mq-track { animation: mqslide var(--mq-dur, 10s) linear infinite; }
+/* Pausa breve al inicio de cada vuelta para poder empezar a leer */
+@keyframes mqslide { 0%, 14% { transform: translateX(0); } 100% { transform: translateX(calc(-1 * var(--mq-dist, 100px))); } }
+@media (prefers-reduced-motion: reduce) {
+  .mq-run { -webkit-mask-image: none; mask-image: none; text-overflow: ellipsis; }
+  .mq-run .mq-track { animation: none !important; }
+}
+
+/* ───────────── Vidrio degradado (glassmorphism) como el modo inmersivo ───────────── */
+.glass-panel { position: relative; border-radius: 1.75rem; padding: .35rem; overflow: hidden;
+  background: linear-gradient(155deg, rgba(255,255,255,.15) 0%, rgba(255,255,255,.05) 52%, rgba(255,255,255,.09) 100%);
+  border: 1px solid rgba(255,255,255,.15);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5); backdrop-filter: blur(22px) saturate(1.5);
+  box-shadow: 0 20px 50px -24px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.2); }
+[data-theme="light"] .glass-panel { background: linear-gradient(155deg, rgba(255,255,255,.8) 0%, rgba(255,255,255,.5) 100%);
+  border-color: rgba(0,0,0,.07); box-shadow: 0 18px 44px -26px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.9); }
+.glass-backdrop { position: absolute; left: -1.25rem; right: -1.25rem; top: 0; bottom: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+@media (min-width: 1024px) { .glass-backdrop { left: 0; right: 0; border-radius: 2rem; } }
+.glass-backdrop img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scale(1.5); filter: blur(60px) saturate(1.4); opacity: .5; }
+.glass-backdrop::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--bg) 55%, transparent) 55%, var(--bg) 100%); }
+
+/* ===== Listas de canciones estilo Spotify (con el color de la app) ===== */
+.srow { border-radius: 8px; transition: background .15s ease; }
+.srow:hover, .srow:focus-within { background: color-mix(in srgb, var(--t) 8%, transparent); }
+.srow.on .srow-t { color: var(--a); }
+.srow .srow-act { opacity: 1; }
+@media (hover: hover) and (min-width: 1024px) {
+  .srow .srow-act:not(.keep) { opacity: 0; transition: opacity .15s; }
+  .srow:hover .srow-act, .srow:focus-within .srow-act { opacity: 1; }
+}
+.srow-head { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--m); border-bottom: 1px solid var(--bd); }
+.eqb { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+.eqb i { display: block; width: 3px; height: 100%; border-radius: 1px; background: var(--a); transform-origin: bottom; animation: eqb 1s ease-in-out infinite; }
+.eqb i:nth-child(2) { animation-delay: -.35s; animation-duration: .8s; }
+.eqb i:nth-child(3) { animation-delay: -.7s; animation-duration: 1.1s; }
+.eqb.paused i { animation-play-state: paused; transform: scaleY(.35); }
+@keyframes eqb { 0%, 100% { transform: scaleY(.3); } 50% { transform: scaleY(1); } }
+@media (prefers-reduced-motion: reduce) { .eqb i { animation: none; transform: scaleY(.6); } }
+
+/* ===== Widgets del inicio: tamaños (celular: 1/3 · 1/2 · fila completa; PC: 1/4 · 1/3 · 1/2 · 3/4 · fila completa) ===== */
+.wg { width: 100%; min-width: 0; container-type: inline-size; }
+.wg-xs { width: calc(33.333% - 10.667px); }
+.wg-s { width: calc(50% - 8px); }
+@media (min-width: 768px) {
+  .wg-xs { width: calc(25% - 12px); }
+  .wg-s { width: calc(33.333% - 10.667px); }
+  .wg-m { width: calc(50% - 8px); }
+  .wg-l { width: calc(75% - 4px); }
+}
+.hold-ring { stroke-dasharray: 163.4; stroke-dashoffset: 163.4; animation: holdRing 4.55s linear forwards; }
+@keyframes holdRing { to { stroke-dashoffset: 0; } }

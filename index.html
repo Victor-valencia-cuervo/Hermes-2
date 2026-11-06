@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <base href="/" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5.0, viewport-fit=cover" />
+    <title>Hermes – Reproductor de música local, radios y mascotas</title>
+    <meta name="description" content="Escucha música local con el reproductor portable Hermes: radios del mundo, mascotas virtuales, clima, recordatorios y atajos. Rápido y privado." />
+    <meta name="keywords" content="reproductor de música, escuchar música local, reproductor portable, radios online, mascotas virtuales, clima, recordatorios, notas, atajos, hermes app" />
+    <link rel="canonical" href="https://hermes06.pages.dev/" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="author" content="Hermes" />
+    <meta name="google-site-verification" content="xiBIzLq8YxXlRWVpzV9y-yaeQ5NWnLQxEq3rp2YrvMU" />
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="es_ES" />
+    <meta property="og:site_name" content="Hermes" />
+    <meta property="og:title" content="Hermes – Reproductor de música local, radios y mascotas" />
+    <meta property="og:description" content="Escucha música local, radios del mundo, mascotas virtuales, clima, recordatorios y atajos. Rápido, privado y offline." />
+    <meta property="og:url" content="https://hermes06.pages.dev/" />
+    <meta property="og:image" content="https://hermes06.pages.dev/icon/hermes-icon.png" />
+    <meta property="og:image:width" content="500" />
+    <meta property="og:image:height" content="500" />
+    <meta property="og:image:alt" content="Icono de Hermes" />
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Hermes – Reproductor de música local, radios y mascotas" />
+    <meta name="twitter:description" content="Escucha música local, radios del mundo, mascotas virtuales, clima y recordatorios." />
+    <meta name="twitter:image" content="https://hermes06.pages.dev/icon/hermes-icon.png" />
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+    <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: light)" />
+    <style>html,body{background:#09090b;color:#fafafa;margin:0}html[data-theme="light"],html[data-theme="light"] body{background:#fafafa;color:#09090b}#root{min-height:100dvh;background:inherit}</style>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" type="image/png" sizes="500x500" href="/icon/hermes-icon.png" />
+    <link rel="apple-touch-icon" href="/icon/hermes-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Hermes" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://www.youtube.com" />
+    <link rel="preconnect" href="https://music.youtube.com" />
+    <link rel="preconnect" href="https://www.youtube-nocookie.com" />
+    <link rel="preconnect" href="https://pipedapi.ducks.party" />
+    <link rel="preconnect" href="https://api.piped.private.coffee" />
+    <link rel="preconnect" href="https://i.ytimg.com" crossorigin />
+    <link rel="preconnect" href="https://api.audius.co" crossorigin />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,500;1,600&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Hermes",
+      "url": "https://hermes06.pages.dev/",
+      "applicationCategory": "LifestyleApplication",
+      "operatingSystem": "Web",
+      "inLanguage": "es",
+      "description": "Reproductor portable para escuchar música local, radios del mundo, mascotas virtuales, clima, recordatorios y atajos.",
+      "keywords": "reproductor de música, escuchar música local, reproductor portable, radios online, mascotas virtuales",
+      "featureList": "reproductor música local, radios online, mascotas virtuales, clima, recordatorios, notas, atajos",
+      "offers": { "@type": "Offer", "price": "0" }
+    }
+    </script>
+    <script>
+      try { var d = JSON.parse(localStorage.getItem('h_dark')); document.documentElement.dataset.theme = d === false ? 'light' : 'dark'; } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="boot" style="display:none;max-width:26rem;margin:4rem auto;padding:0 1.5rem;font-family:system-ui;text-align:center;color:#fafafa">
+      <p style="font-weight:700">Hermes no arrancó en este navegador</p>
+      <pre id="boot-err" style="display:none;font-size:.7rem;text-align:left;white-space:pre-wrap;word-break:break-all;background:rgba(255,255,255,.07);padding:.6rem;border-radius:.6rem;max-height:12rem;overflow-y:auto"></pre>
+      <p style="font-size:.85rem;opacity:.7">Prueba recargar. Si sigue igual, abre con <b>?seguro=1</b> al final de la dirección (arranca sin tus datos) o borra los datos del sitio en ajustes del navegador.</p>
+      <button onclick="try{localStorage.clear()}catch(e){};location.reload()" style="margin-top:1rem;padding:.6rem 1.2rem;border-radius:.8rem;border:0;background:#6366f1;color:#fff">Reintentar limpio</button>
+    </div>
+    <script>
+      // Red de seguridad de ARRANQUE: solo avisa si la app de verdad no llegó a montar.
+      // Una vez que React pintó, nada de esto vuelve a mostrarse (antes cualquier promesa
+      // rechazada, como un fetch fallido, hacía aparecer este cartel al hacer scroll).
+      (function () {
+        var errs = [];
+        var root = document.getElementById('root');
+        var boot = document.getElementById('boot');
+        function mounted() { try { return !!(root && root.hasChildNodes()); } catch (e) { return true; } }
+        function hide() { try { if (boot) boot.style.display = 'none'; } catch (e) {} }
+        function show(msg) {
+          try {
+            if (mounted()) return;
+            errs.push(String(msg).slice(0, 300));
+            var p = document.getElementById('boot-err');
+            if (boot) boot.style.display = 'block';
+            if (p) { p.style.display = 'block'; p.textContent = errs.slice(-4).join('\n---\n'); }
+          } catch (e) {}
+        }
+        // Cuando la app monta, el cartel (si estaba) se esconde y se apaga todo.
+        if (root && 'MutationObserver' in window) {
+          var obs = new MutationObserver(function () {
+            if (root.hasChildNodes()) { hide(); obs.disconnect(); }
+          });
+          obs.observe(root, { childList: true });
+        }
+        window.addEventListener('error', function (e) {
+          if (mounted()) return;
+          if (e && (e.filename || e.message)) show('Error: ' + (e.message || '') + ' @' + (e.filename || '').split('/').pop() + ':' + (e.lineno || '?'));
+        }, true);
+        // Promesas rechazadas (red caída, Piped sin responder…) son normales: no se muestran.
+        setTimeout(function () {
+          try { if (!mounted()) show('La app no montó (root vacío tras 25s). Revisa tu conexión.'); } catch (e) {}
+        }, 25000);
+      })();
+    </script>
+    <noscript><main style="max-width:42rem;margin:4rem auto;padding:0 1.5rem;font-family:system-ui"><h1>Hermes – Panel personal</h1><p>Hermes es tu panel personal con clima, música, radios, recordatorios, notas y atajos. Activa JavaScript para usar la app.</p></main></noscript>
+    <script nomodule>document.getElementById('boot').style.display='block';document.getElementById('boot-err').style.display='block';document.getElementById('boot-err').textContent='Tu navegador es muy viejo (sin módulos JS). Actualiza Chrome desde Play Store y vuelve a abrir.';</script>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

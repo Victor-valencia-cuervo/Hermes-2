@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Reloj LED con calendario</title>
+<style>
+:root{--bg:#000;--fg:#eceef5;--mut:#9aa0b3;--card:#0e0f12;--line:#2a2d36;--on:#eceef5;--onfg:#000;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#000}}
+:root[data-theme="dark"]{--bg:#000}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 "Trebuchet MS","Segoe UI",system-ui,sans-serif}
+main{max-width:960px;margin:0 auto;padding:20px 16px 32px}
+h1{font:700 24px/1.2 "Trebuchet MS","Segoe UI",sans-serif;margin:0 0 4px}
+.sub{color:var(--mut);margin:0 0 16px;max-width:62ch}
+canvas{display:block;width:100%;aspect-ratio:148/78;cursor:pointer}
+.panel{margin-top:16px;display:grid;gap:14px}
+.grp{display:grid;gap:6px}
+.grp>span{font-size:13px;color:var(--mut)}
+.row{display:flex;flex-wrap:wrap;gap:6px}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--fg);padding:7px 14px;border-radius:999px;min-height:36px}
+button:hover{border-color:var(--mut)}
+button[aria-pressed="true"]{background:var(--on);color:var(--onfg);border-color:var(--on)}
+button:focus-visible{outline:2px solid #3d8bff;outline-offset:2px}
+</style>
+<style id="hw">html,body{background:transparent!important;margin:0!important;padding:0!important;min-height:0!important;overflow:hidden}main{max-width:none!important;padding:0!important}h1,.sub,.panel{display:none!important}canvas{width:100%}</style></head>
+<body>
+<main>
+<h1>Reloj LED con calendario</h1>
+<p class="sub">Reloj circular de puntos que alterna entre agujas y números, con el calendario del mes a su lado. Toca uno para verlo solo y toca de nuevo para volver.</p>
+<canvas id="c" aria-label="Reloj circular de puntos LED y calendario del mes"></canvas>
+<div class="panel">
+  <div class="grp"><span>Vista</span><div class="row" id="views"></div></div>
+  <div class="grp"><span>Reloj</span><div class="row" id="modes"></div></div>
+  <div class="grp"><span>Formato de hora</span><div class="row" id="fmts"></div></div>
+  <div class="grp"><span>Color</span><div class="row" id="themes"></div></div>
+</div>
+</main>
+<script>
+const COLS=142,ROWS=72,M=3,OX=4,OY=4,CX=32,CY=32,RED='#ff3b30',DIM='#8a8f9c';
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const N=COLS*ROWS,A=new Array(N),D=new Array(N),O=new Array(N),H=Array.from({length:N},Math.random);
+let B=A,tm=0,mode='auto',theme='blanco',k=0,fmt=12,SX=OX,csR=0,ksR=0,cs=0,ks=0,view='both';
+const TG={both:[0,0],clock:[35,80],cal:[-90,-33]},VIEWS=['both','clock','cal'];
+const TH={blanco:'#f2f4ff',ambar:'#ffb02e',cian:'#3df0ff',verde:'#3dff86'};
+const col=()=>TH[theme];
+function px(x,y,c){x=Math.floor(x)+SX;y=Math.floor(y)+OY;if(x<0||x>=COLS||y<0||y>=ROWS)return;B[y*COLS+x]=c}
+
+/* Fuente de puntos 3x5 */
+const G={};
+('0 111101101101111|1 010110010010111|2 111001111100111|3 111001111001111|4 101101111001001|5 111100111001111|6 111100111101111|7 111001001001001|8 111101111101111|9 111101111001111|A 010101111101101|B 110101110101110|C 011100100100011|D 110101101101110|E 111100110100111|F 111100110100100|G 011100101101011|I 111010010010111|J 001001001101010|L 100100100100111|M 101111111101101|N 110101101101101|O 010101101101010|P 110101110100100|R 110101110101101|S 011100010001110|T 111010010010010|U 101101101101111|V 101101101101010|Y 101101010010010|Z 111001010100111').split('|').forEach(s=>G[s[0]]=s.slice(2));
+function gl(c,x,y,cl,s){const g=G[c];if(!g)return;for(let i=0;i<15;i++)if(g[i]==='1')for(let a=0;a<s;a++)for(let b=0;b<s;b++)px(x+(i%3)*s+a,y+((i/3)|0)*s+b,cl)}
+function txt(str,x,y,cl,s=1){for(const c of str){gl(c,x,y,cl,s);x+=4*s}}
+const tw=(str,s=1)=>str.length*4*s-s;
+const pol=(a,r)=>[CX+r*Math.sin(a),CY-r*Math.cos(a)];
+function line(x0,y0,x1,y1,cl,th){
+  const n=Math.ceil(Math.hypot(x1-x0,y1-y0)*2);
+  for(let i=0;i<=n;i++){const t=i/n,x=x0+(x1-x0)*t,y=y0+(y1-y0)*t;px(x,y,cl);if(th){Math.abs(x1-x0)<Math.abs(y1-y0)?px(x+1,y,cl):px(x,y+1,cl)}}
+}
+
+/* Reloj con agujas */
+function dHands(d){
+  const h=d.getHours()%12,m=d.getMinutes(),s=d.getSeconds()+d.getMilliseconds()/1000,C=col();
+  for(let i=0;i<60;i++){
+    const a=i*Math.PI/30,mj=i%5===0;let p=pol(a,27);px(p[0],p[1],mj?C:'#6f7480');
+    if(mj){p=pol(a,25.8);px(p[0],p[1],C)}
+  }
+  for(let n=1;n<=12;n++){const p=pol(n*Math.PI/6,19),t=''+n;txt(t,Math.round(p[0]-tw(t)/2),Math.round(p[1]-2.5),C)}
+  let p=pol((h+m/60)*Math.PI/6,11);line(CX,CY,p[0],p[1],C,1);
+  p=pol((m+s/60)*Math.PI/30,16);line(CX,CY,p[0],p[1],C,1);
+  const sa=s*Math.PI/30;p=pol(sa,23);const q=pol(sa+Math.PI,5);line(q[0],q[1],p[0],p[1],RED,0);
+  px(CX-1,CY-1,RED);px(CX,CY-1,RED);px(CX-1,CY,RED);px(CX,CY,RED);
+}
+/* Reloj con números de puntos */
+const F5='01110/10001/10011/10101/11001/10001/01110|00100/01100/00100/00100/00100/00100/01110|01110/10001/00001/00010/00100/01000/11111|11110/00001/00001/01110/00001/00001/11110|00010/00110/01010/10010/11111/00010/00010|11111/10000/11110/00001/00001/10001/01110|00110/01000/10000/11110/10001/10001/01110|11111/00001/00010/00100/01000/01000/01000|01110/10001/10001/01110/10001/10001/01110|01110/10001/10001/01111/00001/00010/01100'.split('|').map(s=>s.replace(/\//g,''));
+function big(str,x,y,cl){
+  for(const c of str){
+    const g=F5[+c];
+    for(let i=0;i<35;i++)if(g[i]==='1')px(x+(i%5)*2,y+((i/5)|0)*2,'!'+cl);
+    x+=12;
+  }
+}
+function dDigits(d){
+  const C=col(),h=d.getHours(),hh=String(fmt===24?h:(h%12||12)).padStart(2,'0'),mm=String(d.getMinutes()).padStart(2,'0'),s=d.getSeconds();
+  big(hh,CX-11,CY-16,C);
+  big(mm,CX-11,CY+2,C);
+  if(fmt===12)txt(h<12?'AM':'PM',CX+15,CY-2,DIM);
+  for(let i=0;i<=s;i++){const p=pol(i*Math.PI/30,27);px(p[0],p[1],i===s?RED:C)}
+}
+/* Calendario */
+const MES=['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'],X0=70;
+function dCal(d){
+  const y=d.getFullYear(),mo=d.getMonth(),hoy=d.getDate(),C=col();
+  txt(MES[mo],X0,3,RED);txt(''+y,116,3,DIM);
+  const off=(new Date(y,mo,1).getDay()+6)%7,dim=new Date(y,mo+1,0).getDate(),wd=(d.getDay()+6)%7;
+  'LMMJVSD'.split('').forEach((l,j)=>txt(l,X0+j*9+2,12,j===wd?RED:DIM));
+  for(let n=1;n<=dim;n++){
+    const q=off+n-1,r=(q/7)|0,j=q%7,x0=X0+j*9,y0=21+r*7;
+    if(n===hoy)for(let dy=-5;dy<=5;dy++)for(let dx=-5;dx<=5;dx++)if(dx*dx+dy*dy<=19)px(x0+3+dx,y0+2+dy,RED);
+    txt(''+n,x0+(n<10?2:0),y0,n===hoy?'#fff':j>4?'#6d7280':C);
+  }
+}
+
+/* Controles */
+function mk(id,items,fn){
+  const el=document.getElementById(id);
+  items.forEach(([key,name])=>{
+    const b=document.createElement('button');b.type='button';b.textContent=name;
+    b.onclick=()=>{fn(key);[...el.children].forEach(c=>c.setAttribute('aria-pressed',c===b))};el.appendChild(b);
+  });
+  el.children[0].setAttribute('aria-pressed',true);
+}
+mk('modes',[['auto','Automático'],['hands','Agujas'],['digits','Números']],v=>mode=v);
+mk('views',[['both','Reloj y calendario'],['clock','Solo reloj'],['cal','Solo calendario']],v=>view=v);
+cv.addEventListener('click',e=>{
+  const x=e.offsetX/cv.clientWidth*(COLS+2*M)-M-OX,nx=view==='both'?(x<66?'clock':'cal'):'both';
+  view=nx;[...document.getElementById('views').children].forEach((c,i)=>c.setAttribute('aria-pressed',VIEWS[i]===nx));
+});
+mk('themes',[['blanco','Blanco'],['ambar','Ámbar'],['cian','Cian'],['verde','Verde']],v=>theme=v);
+mk('fmts',[[12,'12 horas'],[24,'24 horas']],v=>fmt=+v);
+
+/* Dibujo */
+function rr(g,x,y,w,h,r){g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath()}
+let bg=null;
+function makeBg(cw){
+  bg=document.createElement('canvas');bg.width=cv.width;bg.height=cv.height;
+  const g=bg.getContext('2d');
+  g.fillStyle='#000';g.fillRect(0,0,bg.width,bg.height);
+  g.beginPath();rr(g,cw,cw,(COLS+4)*cw,(ROWS+4)*cw,5*cw);g.fillStyle='#060607';g.fill();
+  g.strokeStyle='#1d1e23';g.lineWidth=cw*.3;g.stroke();
+  g.fillStyle='rgba(255,255,255,.1)';g.beginPath();
+  const r=cw*.17;
+  for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){const cx=(M+x+.5)*cw,cy=(M+y+.5)*cw;g.moveTo(cx+r,cy);g.arc(cx,cy,r,0,6.2832)}
+  g.fill();
+}
+const ARCS=[[-84,-14],[-5,88],[98,152],[160,196],[206,262]];
+function render(){
+  const dpr=window.devicePixelRatio||1,W=Math.round(cv.clientWidth*dpr);
+  if(W&&(cv.width!==W||!bg)){cv.width=W;cv.height=Math.round(W*(ROWS+2*M)/(COLS+2*M));makeBg(cv.width/(COLS+2*M))}
+  const cw=cv.width/(COLS+2*M),r=cw*.4;
+  ctx.drawImage(bg,0,0);
+  for(let i=0;i<N;i++){
+    let c=O[i];if(!c)continue;
+    let cx=(M+(i%COLS)+.5)*cw,cy=(M+((i/COLS)|0)+.5)*cw,rd=r;
+    if(c[0]==='!'){c=c.slice(1);cx+=cw/2;cy+=cw/2;rd=cw*.8}
+    ctx.fillStyle=c;
+    ctx.globalAlpha=.2;ctx.beginPath();ctx.arc(cx,cy,rd*1.7,0,6.2832);ctx.fill();
+    ctx.globalAlpha=1;ctx.beginPath();ctx.arc(cx,cy,rd,0,6.2832);ctx.fill();
+  }
+  ctx.save();ctx.beginPath();rr(ctx,cw,cw,(COLS+4)*cw,(ROWS+4)*cw,5*cw);ctx.clip();
+  ctx.strokeStyle='#fff';ctx.lineWidth=Math.max(1.2,cw*.2);ctx.lineCap='round';
+  ctx.shadowColor='rgba(255,255,255,.7)';ctx.shadowBlur=cw*.6;ctx.globalAlpha=.85;
+  const ox=(M+OX+csR+CX)*cw,oy=(M+OY+CY)*cw,rad=30.2*cw,rot=tm*.05;
+  for(const [a,b] of ARCS){ctx.beginPath();ctx.arc(ox,oy,rad,a*Math.PI/180+rot,b*Math.PI/180+rot);ctx.stroke()}
+  ctx.restore();
+}
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(.05,(now-last)/1000);last=now;tm+=dt;
+  const tgt=mode==='hands'?0:mode==='digits'?1:Math.floor(tm/8)%2;
+  k+=Math.sign(tgt-k)*Math.min(Math.abs(tgt-k),dt/1.2);
+  const d=new Date();
+  A.fill(null);D.fill(null);O.fill(null);
+  const tg=TG[view],e=1-Math.exp(-dt*5);cs+=(tg[0]-cs)*e;ks+=(tg[1]-ks)*e;csR=Math.round(cs);ksR=Math.round(ks);
+  SX=OX+csR;B=A;dHands(d);B=D;dDigits(d);
+  for(let i=0;i<N;i++)O[i]=H[i]<k?D[i]:A[i];
+  SX=OX+ksR;B=O;dCal(d);
+  render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+<script>(function(){
+const HWhsl=h=>{let[r,g,b]=HWrgb(h).map(v=>v/255);const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;let H=0,L=(mx+mn)/2,S=d===0?0:d/(1-Math.abs(2*L-1));if(d)H=mx===r?((g-b)/d+6)%6:mx===g?(b-r)/d+2:(r-g)/d+4;return[H*60,S,L]};
+const HWrgbOf=(h,s,l)=>{h=((h%360)+360)%360;const a=s*Math.min(l,1-l),f=n=>{const k=(n+h/30)%12;return Math.round(255*(l-a*Math.max(-1,Math.min(k-3,9-k,1))))};return[f(0),f(8),f(4)]};
+
+const HWrgb=h=>{h=String(h||'#ffffff').replace('#','');return[parseInt(h.slice(0,2),16)||0,parseInt(h.slice(2,4),16)||0,parseInt(h.slice(4,6),16)||0]};
+const HWcomp=h=>{let[r,g,b]=HWrgb(h).map(v=>v/255);const mx=Math.max(r,g,b),mn=Math.min(r,g,b);let H=0,L=(mx+mn)/2,S=mx===mn?0:(L>.5?(mx-mn)/(2-mx-mn):(mx-mn)/(mx+mn));if(mx!==mn){H=mx===r?(g-b)/(mx-mn)+(g<b?6:0):mx===g?(b-r)/(mx-mn)+2:(r-g)/(mx-mn)+4;H*=60}
+ H=(H+180)%360;const f=n=>{const k=(n+H/30)%12,a=S*Math.min(L,1-L);return Math.round(255*(L*.55-a*Math.max(-1,Math.min(k-3,9-k,1))))};return'#'+[f(0),f(8),f(4)].map(v=>Math.max(0,Math.min(255,v)).toString(16).padStart(2,'0')).join('')};
+addEventListener('message',function(e){var d=e.data;if(!d||d.__hw!==1)return;try{(function(d){if(d.k!=='cfg')return;var c=d.cfg||{};TH.app=d.color;theme='app';mode=c.mode||'auto';fmt=+(c.fmt||12);view=c.view||'both';})(d)}catch(err){console.warn('widget',err)}});var dn=false;['pointerdown','pointermove','pointerup','pointercancel'].forEach(function(t){addEventListener(t,function(e){if(t==='pointerdown')dn=true;else if(t==='pointermove'&&!dn)return;else if(t!=='pointermove')dn=false;try{parent.postMessage({__hw:1,k:'ptrev',t:t,x:e.clientX,y:e.clientY},'*')}catch(_){}},{passive:true})});try{parent.postMessage({__hw:1,k:'ready'},'*')}catch(e){}})();</script></body>
+</html>

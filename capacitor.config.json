@@ -1,0 +1,7 @@
+{
+  "appId": "com.hermes.panel",
+  "appName": "Hermes",
+  "webDir": "dist",
+  "android": { "allowMixedContent": false },
+  "server": { "androidScheme": "https" }
+}
