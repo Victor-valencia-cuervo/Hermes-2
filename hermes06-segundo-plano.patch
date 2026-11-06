@@ -1,0 +1,1037 @@
+diff --git a/android/app/build.gradle b/android/app/build.gradle
+index 4227dd6..2a4e6a4 100644
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -1,6 +1,9 @@
+ apply plugin: 'com.android.application'
+ 
+ android {
++    compileOptions {
++        coreLibraryDesugaringEnabled true
++    }
+     namespace = "com.hermes.panel"
+     compileSdk = rootProject.ext.compileSdkVersion
+     defaultConfig {
+@@ -36,6 +39,9 @@ dependencies {
+     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+     implementation project(':capacitor-android')
++    implementation 'com.github.teamnewpipe:NewPipeExtractor:v0.26.5'
++    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
++    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.1.5'
+     testImplementation "junit:junit:$junitVersion"
+     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+diff --git a/android/app/src/main/java/com/hermes/panel/MainActivity.java b/android/app/src/main/java/com/hermes/panel/MainActivity.java
+index 0a5d751..5d5a6bb 100644
+--- a/android/app/src/main/java/com/hermes/panel/MainActivity.java
++++ b/android/app/src/main/java/com/hermes/panel/MainActivity.java
+@@ -6,6 +6,7 @@ import com.getcapacitor.BridgeActivity;
+ public class MainActivity extends BridgeActivity {
+     @Override
+     public void onCreate(Bundle savedInstanceState) {
++        registerPlugin(YtAudioPlugin.class); // audio directo de YouTube para el segundo plano
+         super.onCreate(savedInstanceState);
+         // Permite que audio/video arranque sin gesto repetido (la cola sigue sola en segundo plano)
+         getBridge().getWebView().getSettings().setMediaPlaybackRequiresUserGesture(false);
+diff --git a/android/app/src/main/java/com/hermes/panel/NpDownloader.java b/android/app/src/main/java/com/hermes/panel/NpDownloader.java
+new file mode 100644
+index 0000000..ce0f460
+--- /dev/null
++++ b/android/app/src/main/java/com/hermes/panel/NpDownloader.java
+@@ -0,0 +1,65 @@
++package com.hermes.panel;
++
++import org.schabi.newpipe.extractor.downloader.Downloader;
++import org.schabi.newpipe.extractor.downloader.Request;
++import org.schabi.newpipe.extractor.downloader.Response;
++import org.schabi.newpipe.extractor.exceptions.ReCaptchaException;
++
++import java.io.IOException;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.TimeUnit;
++
++import okhttp3.OkHttpClient;
++import okhttp3.RequestBody;
++import okhttp3.ResponseBody;
++
++/** Descargador HTTP (OkHttp) que NewPipeExtractor necesita para hablar con YouTube. */
++public final class NpDownloader extends Downloader {
++    private static final String USER_AGENT =
++        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0";
++    private static NpDownloader instance;
++    private final OkHttpClient client;
++
++    private NpDownloader() {
++        client = new OkHttpClient.Builder()
++            .readTimeout(25, TimeUnit.SECONDS)
++            .connectTimeout(15, TimeUnit.SECONDS)
++            .build();
++    }
++
++    public static synchronized NpDownloader get() {
++        if (instance == null) instance = new NpDownloader();
++        return instance;
++    }
++
++    @Override
++    public Response execute(Request request) throws IOException, ReCaptchaException {
++        final String method = request.httpMethod();
++        final String url = request.url();
++        final Map<String, List<String>> headers = request.headers();
++        final byte[] data = request.dataToSend();
++
++        RequestBody body = null;
++        if (data != null) body = RequestBody.create(data);
++
++        final okhttp3.Request.Builder rb = new okhttp3.Request.Builder()
++            .method(method, body)
++            .url(url)
++            .addHeader("User-Agent", USER_AGENT);
++
++        for (Map.Entry<String, List<String>> e : headers.entrySet()) {
++            rb.removeHeader(e.getKey());
++            for (String v : e.getValue()) rb.addHeader(e.getKey(), v);
++        }
++
++        try (okhttp3.Response res = client.newCall(rb.build()).execute()) {
++            if (res.code() == 429) throw new ReCaptchaException("reCaptcha Challenge requested", url);
++            String text = null;
++            try (ResponseBody rbody = res.body()) {
++                if (rbody != null) text = rbody.string();
++            }
++            return new Response(res.code(), res.message(), res.headers().toMultimap(), text, res.request().url().toString());
++        }
++    }
++}
+diff --git a/android/app/src/main/java/com/hermes/panel/YtAudioPlugin.java b/android/app/src/main/java/com/hermes/panel/YtAudioPlugin.java
+new file mode 100644
+index 0000000..dcafb13
+--- /dev/null
++++ b/android/app/src/main/java/com/hermes/panel/YtAudioPlugin.java
+@@ -0,0 +1,78 @@
++package com.hermes.panel;
++
++import com.getcapacitor.JSObject;
++import com.getcapacitor.Plugin;
++import com.getcapacitor.PluginCall;
++import com.getcapacitor.PluginMethod;
++import com.getcapacitor.annotation.CapacitorPlugin;
++
++import org.schabi.newpipe.extractor.MediaFormat;
++import org.schabi.newpipe.extractor.NewPipe;
++import org.schabi.newpipe.extractor.ServiceList;
++import org.schabi.newpipe.extractor.stream.AudioStream;
++import org.schabi.newpipe.extractor.stream.DeliveryMethod;
++import org.schabi.newpipe.extractor.stream.StreamInfo;
++
++import java.util.List;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++
++/**
++ * Plugin "YtAudio": dada la ID de un video de YouTube devuelve la URL directa de su AUDIO.
++ * La web la reproduce en un <audio> normal, que Android deja sonar con la pantalla apagada
++ * (junto con el servicio en primer plano y la Media Session). Así el segundo plano ya no
++ * depende del iframe de YouTube, que se pausa al apagar la pantalla.
++ */
++@CapacitorPlugin(name = "YtAudio")
++public class YtAudioPlugin extends Plugin {
++    private static final ExecutorService POOL = Executors.newFixedThreadPool(3);
++    private static boolean inited = false;
++
++    private static synchronized void ensureInit() {
++        if (!inited) {
++            NewPipe.init(NpDownloader.get());
++            inited = true;
++        }
++    }
++
++    @PluginMethod
++    public void resolve(final PluginCall call) {
++        final String videoId = call.getString("videoId");
++        if (videoId == null || !videoId.matches("[A-Za-z0-9_-]{11}")) {
++            call.reject("videoId inválido");
++            return;
++        }
++        POOL.execute(() -> {
++            try {
++                ensureInit();
++                StreamInfo info = StreamInfo.getInfo(ServiceList.YouTube,
++                    "https://www.youtube.com/watch?v=" + videoId);
++                AudioStream best = pick(info.getAudioStreams());
++                if (best == null) { call.reject("Sin audio disponible"); return; }
++                JSObject out = new JSObject();
++                out.put("url", best.getContent());
++                out.put("mime", best.getFormat() != null ? best.getFormat().getMimeType() : "");
++                out.put("bitrate", best.getAverageBitrate());
++                out.put("duration", info.getDuration());
++                call.resolve(out);
++            } catch (Throwable e) {
++                call.reject("No se pudo resolver: " + e.getClass().getSimpleName() + " " + e.getMessage());
++            }
++        });
++    }
++
++    /** Prefiere M4A/AAC (lo reproduce cualquier WebView) con la mejor tasa; si no, WebM/Opus. Solo HTTP progresivo. */
++    private static AudioStream pick(List<AudioStream> list) {
++        AudioStream best = null; int bestScore = -1;
++        if (list == null) return null;
++        for (AudioStream s : list) {
++            if (s.getDeliveryMethod() != DeliveryMethod.PROGRESSIVE_HTTP) continue;
++            if (s.getContent() == null || s.getContent().isEmpty()) continue;
++            MediaFormat f = s.getFormat();
++            int base = f == MediaFormat.M4A ? 100000 : f == MediaFormat.WEBMA_OPUS || f == MediaFormat.WEBMA ? 50000 : 0;
++            int score = base + Math.min(s.getAverageBitrate(), 200);
++            if (score > bestScore) { best = s; bestScore = score; }
++        }
++        return best;
++    }
++}
+diff --git a/android/build.gradle b/android/build.gradle
+index f8f0e43..33e58c3 100644
+--- a/android/build.gradle
++++ b/android/build.gradle
+@@ -21,6 +21,7 @@ allprojects {
+     repositories {
+         google()
+         mavenCentral()
++        maven { url 'https://jitpack.io' }
+     }
+ }
+ 
+diff --git a/src/components/PlayerBar.jsx b/src/components/PlayerBar.jsx
+index eb12c4e..890e204 100644
+--- a/src/components/PlayerBar.jsx
++++ b/src/components/PlayerBar.jsx
+@@ -32,7 +32,7 @@ export default function PlayerBar({ p, toast, onOpenFull, min, onMinChange }) {
+   const availabilityText = t.availabilityLabel || getAvailabilityLabel(t.availability);
+   const onError = () => {
+     setBuffering(false);
+-    if (t.source === 'YouTube' && retriedRef.current !== t.id) {
++    if (t.source === 'YouTube' && !t.native && retriedRef.current !== t.id) {
+       // Stream caducado o bloqueado: re-resolver una vez antes de saltar
+       retriedRef.current = t.id;
+       toast?.('Reintentando stream…', AlertTriangle);
+diff --git a/src/hooks/usePlayer.js b/src/hooks/usePlayer.js
+index 5710dcc..10e4ea6 100644
+--- a/src/hooks/usePlayer.js
++++ b/src/hooks/usePlayer.js
+@@ -11,6 +11,7 @@ import { getOriginalCover } from '../services/covers';
+ import { prefersYT, setPrefYT, getCustomArt, setCustomArt, clearCustomArt } from '../lib/artPref';
+ import { SAFE } from '../lib/safe';
+ import { findBgTwin, peekBgTwin } from '../services/bgtwin';
++import { resolveNativeAudio } from '../lib/yt-native';
+ import { normalizeTrackState } from '../lib/music-state';
+ 
+ // Racha de errores YT seguidos antes de frenar el avance automático.
+@@ -18,7 +19,8 @@ import { normalizeTrackState } from '../lib/music-state';
+ const ERR_HALT = 4;
+ 
+ const HIST_MAX = 50;
+-const isYT = (t) => t?.source === 'YouTube' && !!t?.videoId;
++// Un tema de YouTube con audio directo nativo (native) ya suena en <audio>, no en el iframe.
++const isYT = (t) => t?.source === 'YouTube' && !!t?.videoId && !t?.native;
+ 
+ export default function usePlayer(toast, local = null) {
+   const audio = useRef(null);
+@@ -65,6 +67,7 @@ export default function usePlayer(toast, local = null) {
+     dur: savedTrack?.duration || 0,
+   }));
+   // Seek pendiente tras recargar: se aplica una sola vez al montar el audio/YT.
++  const nativeRetry = useRef(null);
+   const pendingSeek = useRef(
+     savedTime?.id && savedTrack && savedTime.id === savedTrack.id && +savedTime.cur > 5
+       ? Math.max(0, +savedTime.cur || 0) : 0,
+@@ -600,6 +603,21 @@ export default function usePlayer(toast, local = null) {
+   const handleAudioError = useCallback(() => {
+     const t = trackRef.current;
+     if (!engagedRef.current && !playingRef.current) return;
++    // Audio directo de YouTube con URL caducada: pide una nueva y sigue en el mismo segundo (una vez por tema).
++    if (t?.native && t.videoId && nativeRetry.current !== t.id) {
++      nativeRetry.current = t.id;
++      const at = curTime();
++      resolveNativeAudio(t.videoId, { force: true }).then((r) => {
++        if (trackRef.current?.id !== t.id) return;
++        if (!r) { nativeRetry.current = null; noteSkip(); next(true); return; }
++        const nt = { ...t, src: r.url };
++        setTrack(nt); setSavedTrack(nt); trackRef.current = nt;
++        pendingSeek.current = at > 5 ? at : 0;
++        setTimeout(() => startPlayback(), 0);
++        setTimeout(() => { if (nativeRetry.current === t.id) nativeRetry.current = null; }, 20000);
++      });
++      return;
++    }
+     if (t?.source === 'Local') {
+       try {
+         const fresh = localRef.current?.urlFor?.(t.id) || null;
+@@ -617,7 +635,7 @@ export default function usePlayer(toast, local = null) {
+     if (noteSkip()) return;
+     toast('Ese stream falló, pasando al siguiente', AlertTriangle);
+     next(true);
+-  }, [next, noteSkip, startPlayback, setSavedTrack, toast]);
++  }, [next, noteSkip, startPlayback, setSavedTrack, toast, curTime]);
+ 
+   /** Reintenta el tema actual (YT bloqueado o stream caído). */
+   const retryCurrent = useCallback(() => {
+@@ -648,7 +666,7 @@ export default function usePlayer(toast, local = null) {
+     try { ytRef.current?.stop(); } catch {}
+     playAt(i, q);
+     pendingSeek.current = cur > 5 ? cur : 0;
+-    toast('Segundo plano activado', Headphones);
++    if (!tw.native) toast('Segundo plano activado', Headphones);
+     return true;
+   }, [curTime, playAt, toast]);
+ 
+@@ -657,7 +675,12 @@ export default function usePlayer(toast, local = null) {
+   // búsquedas (entrada suave). El pase manual a 2º plano sigue instantáneo.
+   useEffect(() => {
+     if (!engagedRef.current) return;
+-    if (track && isYT(track)) findBgTwin(track).catch(() => {});
++    if (track && isYT(track)) {
++      // APK: en cuanto llega el audio directo, el tema pasa del iframe al <audio> (así ya está listo antes de apagar la pantalla)
++      findBgTwin(track).then((tw) => {
++        if (tw?.native && bgPrefRef.current && playingRef.current && trackRef.current?.id === track.id && isYT(trackRef.current)) swapToBg(false);
++      }).catch(() => {});
++    }
+     if (!bgPref) return;
+     const q = queueRef.current; const i = Math.max(0, indexRef.current);
+     [...q.slice(i + 1, i + 4)].filter(isYT).forEach((t) => { findBgTwin(t).catch(() => {}); });
+diff --git a/src/lib/yt-native.js b/src/lib/yt-native.js
+new file mode 100644
+index 0000000..2e556fb
+--- /dev/null
++++ b/src/lib/yt-native.js
+@@ -0,0 +1,44 @@
++// Audio directo de YouTube en el APK (plugin nativo "YtAudio", NewPipeExtractor).
++// Devuelve la URL de AUDIO para reproducirla en un <audio> normal: Android lo deja sonar con la pantalla
++// apagada (servicio en primer plano + Media Session), cosa que el iframe de YouTube no permite.
++// En web/PWA no existe: devuelve null y la app sigue como siempre (iframe + gemelo de Audius).
++import { Capacitor, registerPlugin } from '@capacitor/core';
++
++const isNative = () => { try { return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'; } catch { return false; } };
++let Plugin = null;
++const cache = new Map();    // videoId -> { url, at }
++const inflight = new Map();
++const TTL = 3 * 60 * 60 * 1000; // las URLs de YouTube duran ~6 h; se renuevan antes
++let failStreak = 0; let coolUntil = 0;
++
++export const nativeYtAvailable = () => isNative();
++
++export function peekNativeAudio(videoId) {
++  const e = cache.get(videoId);
++  return e && Date.now() - e.at < TTL ? e : null;
++}
++
++/** Resuelve la URL de audio de un video. `force` ignora la caché (URL caducada). */
++export async function resolveNativeAudio(videoId, { force = false, timeout = 9000 } = {}) {
++  if (!isNative() || !videoId) return null;
++  if (!force) { const hit = peekNativeAudio(videoId); if (hit) return hit; }
++  if (Date.now() < coolUntil) return null; // varios fallos seguidos: descansa un momento
++  if (inflight.has(videoId) && !force) return inflight.get(videoId);
++  if (!Plugin) Plugin = registerPlugin('YtAudio');
++  const p = Promise.race([
++    Plugin.resolve({ videoId }),
++    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeout)),
++  ]).then((r) => {
++    if (!r?.url) throw new Error('sin url');
++    failStreak = 0;
++    const e = { url: r.url, mime: r.mime || '', duration: r.duration || 0, at: Date.now() };
++    cache.set(videoId, e);
++    if (cache.size > 80) cache.delete(cache.keys().next().value);
++    return e;
++  }).catch(() => {
++    if (++failStreak >= 4) { coolUntil = Date.now() + 60000; failStreak = 0; }
++    return null;
++  }).finally(() => inflight.delete(videoId));
++  inflight.set(videoId, p);
++  return p;
++}
+diff --git a/src/services/bgtwin.js b/src/services/bgtwin.js
+index a215558..1aa57de 100644
+--- a/src/services/bgtwin.js
++++ b/src/services/bgtwin.js
+@@ -5,6 +5,7 @@
+ // Solo se acepta una coincidencia fuerte (título + artista + duración parecida); si no hay, no
+ // se inventa nada y el tema sigue por YouTube.
+ import { searchTracks } from './audius';
++import { nativeYtAvailable, resolveNativeAudio } from '../lib/yt-native';
+ 
+ const TTL = 30 * 60 * 1000;
+ const cache = new Map();   // id YouTube -> { t, twin|null }
+@@ -37,6 +38,21 @@ export function findBgTwin(t, timeout = 4000) {
+   const hit = peekBgTwin(t.id);
+   if (hit !== undefined) return Promise.resolve(hit);
+   if (inflight.has(t.id)) return inflight.get(t.id);
++  // APK: audio directo de ESA MISMA canción de YouTube (100 % igual, sin buscar parecidos). Si falla, sigue Audius.
++  if (nativeYtAvailable()) {
++    const pn = resolveNativeAudio(t.videoId).then((r) => {
++      if (!r) return findAudiusTwin(t, timeout);
++      const twin = { ...t, src: r.url, native: true, twinOf: t.id, twinTitle: t.title };
++      cache.set(t.id, { t: Date.now(), twin });
++      return twin;
++    }).finally(() => inflight.delete(t.id));
++    inflight.set(t.id, pn);
++    return pn;
++  }
++  return findAudiusTwin(t, timeout);
++}
++
++function findAudiusTwin(t, timeout) {
+   const { artist, song } = split(t);
+   const ts = toks(song); const as = toks(artist);
+   const q1 = `${artist} ${song}`.replace(/\s+/g, ' ').trim().slice(0, 80);
+diff --git a/src/views/MusicView.jsx b/src/views/MusicView.jsx
+index d56e02a..2246002 100644
+--- a/src/views/MusicView.jsx
++++ b/src/views/MusicView.jsx
+@@ -621,6 +621,17 @@ export default function MusicView({ p, toast, local, auth, onOpenRoom }) {
+     }
+   };
+ 
++  /** Corazón de una canción del top (aún sin versión reproducible): la resuelve y la guarda en Me gusta. */
++  const favEntry = async (entry) => {
++    const have = (p.favs || []).find((f) => f.title === entry.title && String(f.artist).split(',')[0] === String(entry.artist).split(',')[0]);
++    if (have) { p.toggleFav(have); return; }
++    try {
++      const t = await resolveOfficial(entry.artist, entry.title);
++      if (!t) { toast('No se encontró versión reproducible', AlertTriangle); return; }
++      p.toggleFav(entry.art ? { ...t, art: entry.art, artOriginal: true, ytArt: t.art } : t);
++    } catch { toast('No se pudo guardar ese tema', AlertTriangle); }
++  };
++
+   /** Reproduce el álbum completo en orden: aviso cargando → listo/fallo. */
+   const playAlbum = async (album, tracks) => {
+     const list = tracks || [];
+@@ -1033,7 +1044,7 @@ export default function MusicView({ p, toast, local, auth, onOpenRoom }) {
+           playTrack, openMenu, goSearch, openCategory, openPl, onCreatePl: () => setCreateOpen(true),
+           recs, recAlbums, charts, chartsLoading, cc, changeCountry, randomSongs, randomLoading, reshuffle: () => setRandomKey((k) => k + 1),
+           popTracks, popAlbums, audTrend, roomPls, peers, myAvatar, onOpenRoom, pls, plStats,
+-          hero: recs[0] || releases[0] || charts[0],
++          heroList: [recs[0], releases[0], charts[0], recs[1], releases[1], charts[1]].filter(Boolean), favEntry,
+         }} />
+       )}
+ 
+diff --git a/src/views/music/FigmaBits.jsx b/src/views/music/FigmaBits.jsx
+new file mode 100644
+index 0000000..8ca6a4d
+--- /dev/null
++++ b/src/views/music/FigmaBits.jsx
+@@ -0,0 +1,104 @@
++import { useState, useRef, useEffect } from 'react';
++import { ChevronDown, Heart, Play, Pause, Loader2, MoreVertical, Check } from 'lucide-react';
++import Cover from '../../components/Cover';
++import Marquee from '../../components/Marquee';
++import { fmtTime } from '../../lib/format';
++
++/** Menú "Filtrar por" del Figma: botón pequeño con flecha y lista desplegable. */
++export function FilterMenu({ options, value, onChange }) {
++  const [open, setOpen] = useState(false);
++  const box = useRef(null);
++  useEffect(() => {
++    if (!open) return undefined;
++    const off = (e) => { if (!box.current?.contains(e.target)) setOpen(false); };
++    document.addEventListener('pointerdown', off);
++    return () => document.removeEventListener('pointerdown', off);
++  }, [open]);
++  const label = options.find(([v]) => v === value)?.[1];
++  return (
++    <div className="relative shrink-0" ref={box}>
++      <button onClick={() => setOpen((o) => !o)} aria-haspopup="listbox" aria-expanded={open}
++        className="inline-flex items-center gap-1 text-[12px] h-8 px-2 rounded-lg active:scale-95 transition" style={{ color: 'var(--m)' }}>
++        <span>Filtrar por{label && value !== options[0][0] ? `: ${label}` : ''}</span>
++        <ChevronDown size={14} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
++      </button>
++      {open && (
++        <ul role="listbox" className="absolute right-0 top-full mt-1 z-30 min-w-[10rem] rounded-xl p-1 glass shadow-xl fin">
++          {options.map(([v, l]) => (
++            <li key={v}>
++              <button role="option" aria-selected={v === value} onClick={() => { onChange(v); setOpen(false); }}
++                className="w-full flex items-center justify-between gap-3 text-left text-[13px] px-3 py-2 rounded-lg" style={{ background: v === value ? 'color-mix(in srgb, var(--a) 14%, transparent)' : undefined, color: v === value ? 'var(--a)' : 'var(--t)' }}>
++                {l}{v === value && <Check size={14} />}
++              </button>
++            </li>
++          ))}
++        </ul>
++      )}
++    </div>
++  );
++}
++
++/** Fila del historial (Figma): carátula, título, artista, duración y ⋯. */
++export function HistoryRow({ t, active, playing, loading, onPlay, onMenu }) {
++  return (
++    <div className={`srow group flex items-center gap-3 px-2 py-1.5 ${active ? 'on' : ''}`}>
++      <button onClick={onPlay} className="relative shrink-0" aria-label={`Reproducir ${t.title}`}>
++        <Cover src={t.art} className="w-12 h-12 !rounded-lg" alt={t.title} />
++        <span className="absolute inset-0 grid place-items-center rounded-lg bg-black/55 text-white transition-opacity" style={{ opacity: active || loading ? 1 : 0 }}>
++          {loading ? <Loader2 size={16} className="animate-spin" /> : active && playing ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
++        </span>
++      </button>
++      <button onClick={onPlay} className="flex-1 min-w-0 text-left">
++        <Marquee className="text-[15px] font-semibold" style={{ color: active ? 'var(--a)' : undefined }}>{t.title}</Marquee>
++        <Marquee className="text-[12.5px]" style={{ color: 'var(--m)' }}>{t.artist}</Marquee>
++      </button>
++      {!!t.duration && <span className="text-[12px] tabular-nums shrink-0" style={{ color: 'var(--m)' }}>{fmtTime(t.duration)}</span>}
++      {onMenu && <button className="ico-btn shrink-0 !min-w-[36px] !min-h-[36px]" onClick={onMenu} aria-label={`Opciones de ${t.title}`}><MoreVertical size={18} /></button>}
++    </div>
++  );
++}
++
++const RANK_COLOR = ['#8b5cf6', '#22c55e', '#facc15']; // #1 morado · #2 verde · #3 amarillo (Figma)
++
++/** "Canciones en Tendencia": tarjetas con #posición de color, carátula, título, artista, línea de datos reales,
++ *  duración (si existe) y corazón. */
++export function TrendRow({ rank, t, active, playing, loading, fav, onPlay, onFav }) {
++  const meta = [t.album, t.genre, t.date || t.year].filter(Boolean).join(' · ');
++  return (
++    <div className="flex items-center gap-3 rounded-2xl px-3 py-2.5 transition active:scale-[.99]"
++      style={{ background: active ? 'color-mix(in srgb, var(--a) 14%, var(--s2))' : 'var(--s2)' }}>
++      <span className="w-8 shrink-0 text-center text-[13px] font-bold tabular-nums" style={{ color: RANK_COLOR[rank - 1] || 'var(--t)' }}>#{rank}</span>
++      <button onClick={onPlay} className="relative shrink-0" aria-label={`Reproducir ${t.title}`}>
++        <Cover src={t.art} className="w-12 h-12 !rounded-lg" alt={t.title} />
++        {(loading || (active && playing)) && (
++          <span className="absolute inset-0 grid place-items-center rounded-lg bg-black/55 text-white">
++            {loading ? <Loader2 size={16} className="animate-spin" /> : <Pause size={16} fill="currentColor" />}
++          </span>
++        )}
++      </button>
++      <button onClick={onPlay} className="flex-1 min-w-0 text-left">
++        <Marquee className="text-[15px] font-semibold" style={{ color: active ? 'var(--a)' : undefined }}>{t.title}</Marquee>
++        <Marquee className="text-[12.5px]" style={{ color: 'var(--m)' }}>{t.artist}</Marquee>
++        {!!meta && <p className="text-[11.5px] truncate mt-0.5 opacity-70" style={{ color: 'var(--m)' }}>{meta}</p>}
++      </button>
++      {!!t.duration && <span className="text-[12px] tabular-nums shrink-0" style={{ color: 'var(--m)' }}>{fmtTime(t.duration)}</span>}
++      <button className="ico-btn shrink-0" onClick={onFav} aria-pressed={!!fav} aria-label={fav ? 'Quitar de favoritos' : 'Añadir a favoritos'} style={{ color: '#ec4899' }}>
++        <Heart size={19} fill={fav ? 'currentColor' : 'none'} />
++      </button>
++    </div>
++  );
++}
++
++/** Tarjeta de álbum con n.º de canciones (Top Albums del Figma). */
++export function AlbumTile({ a, onClick }) {
++  return (
++    <button onClick={onClick} aria-label={`Abrir ${a.title}`} className="snap-start w-[10.25rem] sm:w-[12.5rem] shrink-0 text-left group">
++      <div className="w-[10.25rem] h-[10.25rem] sm:w-[12.5rem] sm:h-[12.5rem] rounded-2xl overflow-hidden shadow-xl transition-transform group-hover:-translate-y-0.5 group-active:scale-[.97]">
++        <Cover src={a.art} className="w-full h-full" iconSize={28} alt={a.title} />
++      </div>
++      <Marquee className="text-[15px] font-semibold mt-2 leading-snug">{a.title}</Marquee>
++      <Marquee className="text-[13px] leading-snug" style={{ color: 'var(--m)' }}>{a.artist}</Marquee>
++      {!!a.trackCount && <p className="text-[12px]" style={{ color: 'var(--m)' }}>{a.trackCount} canciones</p>}
++    </button>
++  );
++}
+diff --git a/src/views/music/HeroCarousel.jsx b/src/views/music/HeroCarousel.jsx
+new file mode 100644
+index 0000000..d11325e
+--- /dev/null
++++ b/src/views/music/HeroCarousel.jsx
+@@ -0,0 +1,144 @@
++import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
++import { Play, Pause, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
++import Cover from '../../components/Cover';
++import VideoLayer from '../../components/VideoLayer';
++import useStore from '../../hooks/useStore';
++
++/** Una tarjeta del hero. Solo la activa carga el video y la luz ambiental (ahorra batería y datos);
++ *  las demás muestran la carátula, así el deslizar es fluido incluso en celulares lentos. */
++function Slide({ t, active, live, playing, busy, p, onGo, videoOn }) {
++  const videoBg = active && videoOn && live && t.source === 'YouTube' && !!t.videoId;
++  const isPlaying = active && live && playing;
++  return (
++    <section className="relative overflow-hidden rounded-[2rem] text-white h-full" style={{ background: '#0b0b0e', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.1)' }}>
++      <div aria-hidden="true" className="absolute inset-0 overflow-hidden pointer-events-none">
++        {videoBg
++          ? <div className="absolute inset-0" style={{ filter: 'blur(38px) saturate(1.08) brightness(.95)', transform: 'scale(1.45)', opacity: 0.62 }}>
++              <VideoLayer key={t.videoId} videoId={t.videoId} playing={p.playing} getTime={() => p.getCurrentTime?.() || p.time?.cur || 0} onFail={() => {}} />
++            </div>
++          : t.art && <img src={t.art} alt="" className="absolute inset-0 w-full h-full object-cover" style={{ filter: 'blur(38px) saturate(1.05)', transform: 'scale(1.5)', opacity: 0.6 }} />}
++        <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(10,10,14,.12), rgba(10,10,14,.4))' }} />
++      </div>
++      <div className="relative p-3 sm:p-4">
++        <div className="relative aspect-video lg:aspect-[2.2/1] rounded-[1.4rem] overflow-hidden bg-black" style={{ boxShadow: '0 10px 34px -12px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.1)' }}>
++          {t.art && <img src={t.art} alt="" draggable={false} className="absolute inset-0 w-full h-full object-cover select-none" />}
++          {videoBg && (
++            <div className="absolute inset-0">
++              <VideoLayer key={`f-${t.videoId}`} videoId={t.videoId} playing={p.playing} getTime={() => p.getCurrentTime?.() || p.time?.cur || 0} onFail={() => {}} />
++            </div>
++          )}
++        </div>
++        <div className="flex items-center gap-3 pt-3.5 px-1">
++          <div className="flex-1 min-w-0">
++            <p className="text-[10.5px] font-bold tracking-[0.25em] uppercase opacity-80 flex items-center gap-2">
++              {isPlaying && <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse" />}
++              {active && live ? (playing ? 'Sonando ahora' : 'En pausa') : 'Siguiente'}
++            </p>
++            <h3 className="serif font-semibold leading-[1.1] mt-1 line-clamp-1 text-xl sm:text-3xl" title={t.title}>{t.title}</h3>
++            <p className="mt-0.5 text-sm opacity-80 line-clamp-1" title={t.artist}>{t.artist}</p>
++            <div className="mt-3 flex flex-wrap gap-2">
++              <button onClick={() => onGo(t)} disabled={busy} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white text-black font-semibold text-sm active:scale-95 transition-transform">
++                {busy ? <Loader2 size={16} className="animate-spin" /> : isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
++                {isPlaying ? 'Pausar' : active && live ? 'Continuar' : 'Reproducir'}
++              </button>
++              {active && live && <button onClick={() => p.openFull?.()} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-sm border border-white/30 backdrop-blur active:scale-95 transition-transform">Abrir reproductor</button>}
++            </div>
++          </div>
++          <Cover src={t.art} className={`rounded-2xl shadow-xl shrink-0 w-16 h-16 sm:w-24 sm:h-24 ${isPlaying ? 'breathe' : ''}`} iconSize={30} />
++        </div>
++      </div>
++    </section>
++  );
++}
++
++/** Hero deslizable (como las tarjetas de Google Play): se desliza a derecha o izquierda y al soltar suena esa canción.
++ *  - Con música sonando: las tarjetas son la cola real (anterior · actual · siguientes). Deslizar = saltar a esa canción.
++ *  - Sin música: son sugerencias; deslizar solo las recorre y "Reproducir" empieza desde la tarjeta mostrada. */
++export default function HeroCarousel({ p, feats = [], onPlayFeat, resolving }) {
++  const [videoOn] = useStore('h_hero_video', true);
++  const live = !!p.track;
++  const queue = p.queue || [];
++  const qi = typeof p.index === 'number' ? p.index : -1;
++
++  // Ventana de tarjetas: máx. 2 anteriores y 8 siguientes de la cola (liviano en celulares).
++  const slides = useMemo(() => {
++    if (live && queue.length && qi >= 0 && queue[qi]?.id === p.track?.id) {
++      const from = Math.max(0, qi - 2);
++      return queue.slice(from, qi + 9).map((t, k) => ({ t, qIndex: from + k }));
++    }
++    if (live) return [{ t: p.track, qIndex: -1 }];
++    const seen = new Set();
++    return feats.filter((t) => t && !seen.has(t.id) && seen.add(t.id)).slice(0, 6).map((t) => ({ t, qIndex: -1 }));
++  }, [live, queue, qi, p.track, feats]);
++
++  const activeIdx = live ? Math.max(0, slides.findIndex((s) => s.t.id === p.track?.id)) : 0;
++  const [shown, setShown] = useState(0); // tarjeta centrada (en sugerencias sin música)
++  const cur = live ? activeIdx : Math.min(shown, Math.max(0, slides.length - 1));
++
++  const rail = useRef(null);
++  const lock = useRef(0);
++  const timer = useRef(0);
++
++  const slideEl = (i) => rail.current?.children?.[i];
++  const scrollToIdx = useCallback((i, smooth = true) => {
++    const el = slideEl(i); const r = rail.current;
++    if (!el || !r) return;
++    lock.current = Date.now() + 700; // movimiento hecho por la app: no cuenta como deslizar del usuario
++    r.scrollTo({ left: el.offsetLeft - (r.clientWidth - el.clientWidth) / 2, behavior: smooth ? 'smooth' : 'auto' });
++  }, []);
++
++  // Si la canción cambia por otro lado (siguiente, cola, etc.), el hero la sigue.
++  const lastId = useRef(null);
++  useEffect(() => {
++    const id = p.track?.id || null;
++    if (id !== lastId.current) { scrollToIdx(cur, false); lastId.current = id; }
++  }, [p.track?.id, cur, scrollToIdx, slides.length]);
++
++  const settle = useCallback(() => {
++    const r = rail.current; if (!r || Date.now() < lock.current) return;
++    const mid = r.scrollLeft + r.clientWidth / 2;
++    let best = 0; let bd = Infinity;
++    for (let i = 0; i < r.children.length; i++) {
++      const c = r.children[i]; const d = Math.abs(c.offsetLeft + c.clientWidth / 2 - mid);
++      if (d < bd) { bd = d; best = i; }
++    }
++    if (best === cur) return;
++    if (live && slides[best]?.qIndex >= 0) p.playAt?.(slides[best].qIndex);
++    else setShown(best);
++  }, [cur, live, slides, p]);
++
++  const onScroll = () => { clearTimeout(timer.current); timer.current = setTimeout(settle, 130); };
++  useEffect(() => () => clearTimeout(timer.current), []);
++
++  const go = (t) => {
++    if (live && t.id === p.track?.id) p.toggle?.();
++    else if (live) p.playAt?.(slides.find((s) => s.t.id === t.id)?.qIndex);
++    else onPlayFeat?.(t);
++  };
++  const step = (d) => { const n = Math.min(slides.length - 1, Math.max(0, cur + d)); if (n !== cur) { scrollToIdx(n); if (live && slides[n].qIndex >= 0) p.playAt?.(slides[n].qIndex); else setShown(n); } };
++
++  if (!slides.length) return <div className="h-60 rounded-[2rem] animate-pulse" style={{ background: 'var(--s2)' }} />;
++
++  return (
++    <div className="relative group/hero" role="region" aria-roledescription="carrusel" aria-label="Canciones destacadas">
++      <div ref={rail} onScroll={onScroll}
++        className="flex gap-3 overflow-x-auto snap-x snap-mandatory overscroll-x-contain -mx-5 px-5 lg:mx-0 lg:px-0 items-stretch"
++        style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
++        {slides.map((s, i) => (
++          <div key={s.t.id} className="snap-center shrink-0 w-[90%] lg:w-full" aria-label={`${i + 1} de ${slides.length}`}>
++            <Slide t={s.t} active={i === cur} live={live} playing={p.playing} busy={resolving && !live} p={p} onGo={go} videoOn={videoOn} />
++          </div>
++        ))}
++      </div>
++      {slides.length > 1 && (
++        <>
++          {cur > 0 && <button onClick={() => step(-1)} aria-label="Anterior" className="hidden lg:grid absolute left-3 top-[34%] w-10 h-10 rounded-full place-items-center glass shadow-lg active:scale-90 transition"><ChevronLeft size={20} /></button>}
++          {cur < slides.length - 1 && <button onClick={() => step(1)} aria-label="Siguiente" className="hidden lg:grid absolute right-3 top-[34%] w-10 h-10 rounded-full place-items-center glass shadow-lg active:scale-90 transition"><ChevronRight size={20} /></button>}
++          <div className="flex justify-center gap-1.5 mt-2.5" aria-hidden="true">
++            {slides.map((s, i) => <span key={s.t.id} className="h-1.5 rounded-full transition-all" style={{ width: i === cur ? 18 : 6, background: i === cur ? 'var(--a)' : 'var(--bd)' }} />)}
++          </div>
++        </>
++      )}
++    </div>
++  );
++}
+diff --git a/src/views/music/MusicHome.jsx b/src/views/music/MusicHome.jsx
+index 9cb74b7..1b7d2ed 100644
+--- a/src/views/music/MusicHome.jsx
++++ b/src/views/music/MusicHome.jsx
+@@ -1,11 +1,11 @@
+-import { useMemo } from 'react';
++import { useMemo, useState } from 'react';
+ import { Play, Pause, Loader2, Plus, Shuffle, Heart } from 'lucide-react';
+ import Cover from '../../components/Cover';
+ import Marquee from '../../components/Marquee';
+ import { Section, SectionTitle, Shelf, SquareCard, SongRow, ShelfSkeleton, RowsSkeleton } from './ui';
+ import { PlaylistCard, RoomPlCard } from './RoomCards';
+-import VideoLayer from '../../components/VideoLayer';
+-import useStore from '../../hooks/useStore';
++import HeroCarousel from './HeroCarousel';
++import { FilterMenu, HistoryRow, TrendRow, AlbumTile } from './FigmaBits';
+ import { CATEGORIES, MOODS } from './data';
+ import { albumPath, artistPath } from '../../services/catalog';
+ import { getFollowed } from '../../lib/follow';
+@@ -26,68 +26,15 @@ function ago(ts) {
+   return d === 1 ? 'ayer' : `hace ${d} días`;
+ }
+ 
+-/** Hero: lo que suena ahora. Con video, funciona como la extensión "Ambient light for YouTube": el MISMO video se duplica
+- *  detrás, muy desenfocado y con cristal, y su luz sale por todos los lados siguiendo el video en vivo. El video de
+- *  enfrente queda limpio (sin nada encima, para poder leer la letra) y el título, el artista y los botones van debajo. */
+-function Hero({ p, feat, onPlayFeat, resolving }) {
+-  const [heroVideo] = useStore('h_hero_video', true); // video de la canción como fondo (Ajustes)
+-  const t = p.track || feat;
+-  const live = !!p.track;
+-  const videoBg = !!t && heroVideo && live && t.source === 'YouTube' && !!t.videoId;
+-  if (!t) return <div className="h-60 rounded-[2rem] animate-pulse" style={{ background: 'var(--s2)' }} />;
+-  const go = () => { if (live) p.toggle(); else onPlayFeat(feat); };
+-  const vid = (extra = {}) => (
+-    <div className="absolute inset-0" style={extra}>
+-      <VideoLayer key={t.videoId} videoId={t.videoId} playing={p.playing} getTime={() => p.getCurrentTime?.() || p.time?.cur || 0} onFail={() => {}} />
+-    </div>
+-  );
+-  return (
+-    <section className="relative overflow-hidden rounded-[2rem] text-white" style={{ background: '#0b0b0e', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.1)' }}>
+-      {/* Luz ambiental: el video (o la carátula) duplicado, a pantalla completa, muy difuminado y suave */}
+-      <div aria-hidden="true" className="absolute inset-0 overflow-hidden pointer-events-none">
+-        {videoBg
+-          ? vid({ filter: 'blur(38px) saturate(1.08) brightness(.95)', transform: 'scale(1.45)', opacity: 0.62 })
+-          : t.art && <img src={t.art} alt="" className="absolute inset-0 w-full h-full object-cover" style={{ filter: 'blur(38px) saturate(1.05)', transform: 'scale(1.5)', opacity: 0.6 }} />}
+-        <div className="absolute inset-0 backdrop-blur-2xl" style={{ background: 'linear-gradient(180deg, rgba(10,10,14,.12), rgba(10,10,14,.34))' }} />
+-      </div>
+-
+-      <div className="relative p-3 sm:p-4">
+-        {/* Video limpio: nada encima, se lee todo lo que tenga el video */}
+-        {videoBg && (
+-          <div className="relative aspect-video lg:aspect-[2.2/1] rounded-[1.4rem] overflow-hidden bg-black" style={{ boxShadow: '0 10px 34px -12px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.1)' }}>
+-            {t.art && <img src={t.art} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+-            {vid()}
+-          </div>
+-        )}
+-        <div className={`flex items-center gap-3 ${videoBg ? 'pt-3.5 px-1' : 'py-2 px-1'}`}>
+-          <div className="flex-1 min-w-0">
+-            <p className="text-[10.5px] font-bold tracking-[0.25em] uppercase opacity-80 flex items-center gap-2">
+-              {live && p.playing && <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse" />}
+-              {live ? (p.playing ? 'Sonando ahora' : 'En pausa') : 'Para empezar'}
+-            </p>
+-            <h3 className={`serif font-semibold leading-[1.1] mt-1 line-clamp-2 ${videoBg ? 'text-xl sm:text-2xl' : 'text-2xl sm:text-4xl'}`} title={t.title}>{t.title}</h3>
+-            <p className="mt-0.5 text-sm opacity-80 line-clamp-1" title={t.artist}>{t.artist}</p>
+-            <div className="mt-3 flex flex-wrap gap-2">
+-              <button onClick={go} disabled={resolving} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white text-black font-semibold text-sm active:scale-95 transition-transform">
+-                {resolving ? <Loader2 size={16} className="animate-spin" /> : live && p.playing ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
+-                {live ? (p.playing ? 'Pausar' : 'Continuar') : 'Reproducir'}
+-              </button>
+-              {live && <button onClick={() => p.openFull?.()} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-sm border border-white/30 backdrop-blur active:scale-95 transition-transform">Abrir reproductor</button>}
+-            </div>
+-          </div>
+-          <Cover src={t.art} className={`rounded-2xl shadow-xl shrink-0 ${videoBg ? 'w-16 h-16 sm:w-24 sm:h-24' : 'w-24 h-24 sm:w-36 sm:h-36 sm:rounded-3xl'} ${live && p.playing ? 'breathe' : ''}`} iconSize={30} />
+-        </div>
+-      </div>
+-    </section>
+-  );
+-}
+-
+ /** Pantalla de inicio de música. Todo sale de datos reales: tu historial, tus playlists,
+  *  los charts de iTunes/Deezer y búsquedas de YouTube. Nada inventado ni repetido entre secciones. */
+ export default function MusicHome({ h }) {
+   const { p, toast, nav, fuente, resolvingId, playEntry, playTrack, openMenu, goSearch, openCategory, openPl, onCreatePl,
+     recs, recAlbums, charts, chartsLoading, cc, changeCountry, randomSongs, randomLoading, reshuffle,
+-    popTracks, popAlbums, audTrend, roomPls, peers, myAvatar, onOpenRoom, openRoom, pls, plStats, hero } = h;
++    popTracks, popAlbums, audTrend, roomPls, peers, myAvatar, onOpenRoom, openRoom, pls, plStats, heroList, favEntry } = h;
++  const [replayF, setReplayF] = useState('all');
++  const [histF, setHistF] = useState('recent');
++  const [showAll, setShowAll] = useState(false);
+ 
+   // ---- Volver a escuchar: Me gusta + lo que más oyes + álbumes de tus artistas + tus playlists + Crear ----
+   const replay = useMemo(() => {
+@@ -99,15 +46,17 @@ export default function MusicHome({ h }) {
+     return [...first.entries()].sort((a, b) => (count.get(b[0]) - count.get(a[0]))).map(([, t]) => t).slice(0, 10);
+   }, [p.history]);
+ 
+-  // Historial en columnas de 5 temas hacia abajo, deslizable a derecha e izquierda
+-  const historyCols = useMemo(() => {
+-    const list = (p.history || []).slice(0, 40);
+-    const cols = [];
+-    for (let i = 0; i < list.length; i += 5) {
+-      cols.push(list.slice(i, i + 5));
++  // Historial (Figma): 5 filas por columna; 1 columna en celular, 2 en tablet, 3 en PC.
++  const histList = useMemo(() => {
++    const list = (p.history || []).slice(0, 60);
++    if (histF === 'top') {
++      const c = new Map(); const f = new Map();
++      for (const t of list) { const k = keyOf(t); c.set(k, (c.get(k) || 0) + 1); if (!f.has(k)) f.set(k, t); }
++      return [...f.entries()].sort((x, y) => c.get(y[0]) - c.get(x[0])).map(([, t]) => t).slice(0, 15);
+     }
+-    return cols;
+-  }, [p.history]);
++    const seen = new Set();
++    return list.filter((t) => { const k = keyOf(t); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 15);
++  }, [p.history, histF]);
+ 
+   // ---- Sin repetir entre secciones de descubrimiento ----
+   const used = new Set();
+@@ -145,7 +94,7 @@ export default function MusicHome({ h }) {
+ 
+   return (
+     <div className="space-y-9">
+-      <Hero p={p} feat={hero} onPlayFeat={h.playFeat} resolving={!!resolvingId} />
++      <HeroCarousel p={p} feats={heroList} onPlayFeat={h.playFeat} resolving={!!resolvingId} />
+ 
+       {fuente === 'audius' && (
+         <Section title="Tendencias en Audius" sub="Completas y descargables · catálogo independiente">
+@@ -157,57 +106,106 @@ export default function MusicHome({ h }) {
+       )}
+ 
+       {/* ===== Volver a escuchar ===== */}
+-      <Section title="Volver a escuchar" sub={hasReplay ? 'Tus canciones, álbumes y playlists' : undefined}>
++      <Section title="Volver a escuchar" action={
++        <FilterMenu value={replayF} onChange={setReplayF} options={[['all', 'Todo'], ['songs', 'Canciones'], ['albums', 'Álbumes'], ['playlists', 'Playlists'], ['artists', 'Artistas']]} />
++      }>
+         <Shelf>
+-          {!!(p.favs || []).length && (
++          {(replayF === 'all' || replayF === 'playlists') && !!(p.favs || []).length && (
+             <PlaylistCard pl={{ id: 'fav', name: 'Tus Me Gusta', tracks: p.favs }} plays={plStats.fav || 0} onClick={() => openPl('fav')} />
+           )}
+-          {getFollowed().slice(0, 8).map((a) => (
++          {(replayF === 'all' || replayF === 'artists') && getFollowed().slice(0, 8).map((a) => (
+             <SquareCard key={`f-${a.ref}`} art={a.art} title={a.name} sub="Artista" badge="Sigues" onClick={() => nav(artistPath(a))} />
+           ))}
+-          {replay.map((t) => (
++          {(replayF === 'all' || replayF === 'songs') && replay.map((t) => (
+             <SquareCard key={`r-${t.id}`} art={t.art} title={t.title} sub={t.artist} label={`Reproducir ${t.title}`}
+               onClick={() => play(t)} active={p.track?.id === t.id} playing={p.playing} />
+           ))}
+-          {(recAlbums || []).map((a) => (
++          {(replayF === 'all' || replayF === 'albums') && (recAlbums || []).map((a) => (
+             <SquareCard key={a.ref || a.id} art={a.art} title={a.title} sub={a.artist} badge="Álbum" onClick={() => nav(albumPath(a))} />
+           ))}
+-          {pls.playlists.map((pl) => (
++          {(replayF === 'all' || replayF === 'playlists') && pls.playlists.map((pl) => (
+             <PlaylistCard key={pl.id} pl={pl} plays={plStats[pl.id] || 0} onClick={() => openPl(pl.id)} />
+           ))}
+-          {/* Al deslizar hasta el final aparece Crear playlist */}
+-          <button onClick={onCreatePl} aria-label="Crear playlist"
+-            className="snap-start w-[10.25rem] sm:w-[12.5rem] shrink-0 text-left group">
+-            <span className="grid place-items-center w-[10.25rem] h-[10.25rem] sm:w-[12.5rem] sm:h-[12.5rem] rounded-2xl transition group-active:scale-95"
+-              style={{ border: '2px dashed var(--bd)', background: 'var(--s)' }}>
+-              <span className="w-12 h-12 rounded-full grid place-items-center text-white" style={{ background: 'var(--a)' }}><Plus size={24} /></span>
+-            </span>
+-            <p className="text-[15px] font-semibold mt-2">Crear playlist</p>
+-          </button>
++          {(replayF === 'all' || replayF === 'playlists') && (
++            <button onClick={onCreatePl} aria-label="Crear playlist" className="snap-start w-[10.25rem] sm:w-[12.5rem] shrink-0 text-left group">
++              <span className="grid place-items-center w-[10.25rem] h-[10.25rem] sm:w-[12.5rem] sm:h-[12.5rem] rounded-2xl transition group-active:scale-95"
++                style={{ border: '2px dashed var(--bd)', background: 'var(--s)' }}>
++                <span className="w-12 h-12 rounded-full grid place-items-center text-white" style={{ background: 'var(--a)' }}><Plus size={24} /></span>
++              </span>
++              <p className="text-[15px] font-semibold mt-2">Crear playlist</p>
++            </button>
++          )}
+         </Shelf>
+         {!hasReplay && <p className="text-sm mt-1" style={{ color: 'var(--m)' }}>Aún no hay nada aquí: reproduce una canción o dale ♥ y aparece.</p>}
+       </Section>
+ 
+-      {/* ===== Historial ===== */}
++      {/* ===== Tu Historial (Figma) ===== */}
+       {(p.history || []).length > 0 && (
+-        <Section title="Historial" sub={`${(p.history || []).length} canciones · Desliza para explorar`} action={
+-          <button className="text-xs px-3 py-2 rounded-full transition-transform active:scale-95" style={{ background: 'var(--s2)', color: 'var(--m)' }} onClick={() => p.clearHistory()}>Limpiar</button>
++        <Section title="Tu Historial" action={
++          <div className="flex items-center gap-1">
++            <FilterMenu value={histF} onChange={setHistF} options={[['recent', 'Recientes'], ['top', 'Más escuchadas']]} />
++            <button className="text-xs px-3 h-8 rounded-lg active:scale-95" style={{ color: 'var(--m)' }} onClick={() => p.clearHistory()}>Limpiar</button>
++          </div>
+         }>
+-          <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 pt-0.5 -mx-5 px-5 sm:mx-0 sm:px-0"
+-            style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+-            {historyCols.map((colSongs, colIdx) => (
+-              <div key={colIdx} className="w-[88vw] max-w-[380px] shrink-0 snap-start space-y-0">
+-                {colSongs.map((t) => (
+-                  <SongRow key={`${t.id}-${t.at || ''}-${colIdx}`} art={t.art} title={t.title} sub={`${t.artist}${t.at ? ` · ${ago(t.at)}` : ''}`}
+-                    active={p.track?.id === t.id} playing={p.playing} loading={resolvingId === t.id}
+-                    onPlay={() => play(t)} onMenu={() => openMenu(t, p.history, { kind: 'yt' })} />
+-                ))}
++          <div className="md:grid md:grid-flow-col md:grid-rows-5 md:grid-cols-2 lg:grid-cols-3 md:gap-x-6">
++            {histList.map((t, i) => (
++              <div key={`${t.id}-${i}`} className={i >= 10 ? 'hidden lg:block' : i >= 5 ? 'hidden md:block' : ''}>
++                <HistoryRow t={t} active={p.track?.id === t.id} playing={p.playing} loading={resolvingId === t.id}
++                  onPlay={() => play(t)} onMenu={() => openMenu(t, p.history, { kind: 'yt' })} />
+               </div>
+             ))}
+           </div>
+         </Section>
+       )}
+ 
++      {/* ===== Descubre tus canciones ===== */}
++      <Section title="Descubre tus canciones" action={
++        <button className="text-xs px-3 h-8 rounded-lg inline-flex items-center gap-1.5 active:scale-95" style={{ color: 'var(--m)' }} onClick={reshuffle} aria-label="Mezclar descubrimiento">
++          <Shuffle size={13} /> Mezclar
++        </button>
++      }>
++        {discover.length ? (
++          <Shelf>
++            {discover.map((t) => (
++              <SquareCard key={t.id} art={t.art} title={t.title} sub={t.artist} label={`Reproducir ${t.title}`}
++                active={p.track?.id === t.id} playing={p.playing} badge={t.official ? 'Oficial' : undefined} onClick={() => play(t, discover)} />
++            ))}
++          </Shelf>
++        ) : (randomLoading ? <ShelfSkeleton n={5} /> : <p className="text-sm" style={{ color: 'var(--m)' }}>Toca Mezclar para traer canciones.</p>)}
++      </Section>
++
++      {/* ===== Top Albums ===== */}
++      {(popAlbums || []).length > 0 && (
++        <Section title="Top Albums">
++          <Shelf>{popAlbums.map((a) => <AlbumTile key={a.ref} a={a} onClick={() => nav(albumPath(a))} />)}</Shelf>
++        </Section>
++      )}
++
++      {/* ===== Canciones en Tendencia (con el país del top) ===== */}
++      <section>
++        <SectionTitle title="Canciones en Tendencia" action={
++          <select className="inp !w-auto !py-1.5 !min-h-[36px] !rounded-full text-xs" value={cc} aria-label="País del top" onChange={(e) => changeCountry(e.target.value)}>
++            {CHART_COUNTRIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
++          </select>
++        } />
++        {chartsLoading && !charts?.length && <RowsSkeleton n={5} numbered />}
++        {!!charts?.length && (
++          <div className="space-y-2">
++            {charts.slice(0, showAll ? 25 : 7).map((c) => (
++              <TrendRow key={c.id} rank={c.rank} t={c} active={p.track?.id === c.id || (p.track && keyOf(p.track) === keyOf(c))} playing={p.playing}
++                loading={resolvingId === c.id} fav={(p.favs || []).some((f) => keyOf(f) === keyOf(c))}
++                onPlay={() => playEntry(c)} onFav={() => favEntry(c)} />
++            ))}
++            {charts.length > 7 && (
++              <button onClick={() => setShowAll((v) => !v)} className="w-full h-11 rounded-2xl text-sm font-semibold active:scale-[.98] transition" style={{ background: 'var(--s2)', color: 'var(--m)' }}>
++                {showAll ? 'Ver menos' : `+ Ver todo (${Math.min(25, charts.length)})`}
++              </button>
++            )}
++          </div>
++        )}
++        {!chartsLoading && !charts?.length && <p className="text-sm" style={{ color: 'var(--m)' }}>No se pudo cargar el top de {countryName}. Prueba con otro país.</p>}
++      </section>
++
+       {/* ===== Comunidad (playlists de grupos y de a 2) ===== */}
+       {!!roomPls.length && (
+         <Section title="Comunidad" sub="Playlists de tus grupos y chats">
+@@ -235,25 +233,6 @@ export default function MusicHome({ h }) {
+         </div>
+       </Section>
+ 
+-      {/* ===== Descubre: tendencias con datos reales ===== */}
+-      <section>
+-        <SectionTitle title="Descubre" sub={`Tendencias en ${countryName} ahora`} action={
+-          <select className="inp !w-auto !py-1.5 !min-h-[40px] !rounded-full text-xs" value={cc} aria-label="País del top" onChange={(e) => changeCountry(e.target.value)}>
+-            {CHART_COUNTRIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+-          </select>
+-        } />
+-        {chartsLoading && !charts?.length && <ShelfSkeleton n={5} />}
+-        {!!charts?.length && (
+-          <Shelf>
+-            {charts.slice(0, 12).map((c) => (
+-              <SquareCard key={c.id} art={c.art} title={c.title} sub={c.artist} badge={c.rank ? `#${c.rank}` : undefined} label={`Reproducir ${c.title}`}
+-                spinning={resolvingId === c.id} onClick={() => playEntry(c)} />
+-            ))}
+-          </Shelf>
+-        )}
+-        {!chartsLoading && !charts?.length && <p className="text-sm" style={{ color: 'var(--m)' }}>No se pudo cargar el top de {countryName}. Prueba con otro país.</p>}
+-      </section>
+-
+       {/* ===== Selecciones rápidas ===== */}
+       {quick.length > 0 && (
+         <Section title="Selecciones rápidas" sub={(recs || []).length ? 'Basadas en lo que más escuchas' : 'Lo que más suena ahora'}>
+@@ -275,50 +254,6 @@ export default function MusicHome({ h }) {
+         </Section>
+       )}
+ 
+-      {/* ===== Descubrimiento rápido ===== */}
+-      <Section title="Descubrimiento rápido" sub="Música distinta cada vez" action={
+-        <button className="text-xs px-3 py-2 rounded-full inline-flex items-center gap-1.5" style={{ background: 'var(--s2)', color: 'var(--m)' }} onClick={reshuffle} aria-label="Mezclar descubrimiento">
+-          <Shuffle size={13} /> Mezclar
+-        </button>
+-      }>
+-        {discover.length ? (
+-          <Shelf>
+-            {discover.map((t) => (
+-              <SquareCard key={t.id} art={t.art} title={t.title} sub={t.artist} label={`Reproducir ${t.title}`}
+-                active={p.track?.id === t.id} playing={p.playing} badge={t.official ? 'Oficial' : undefined} onClick={() => play(t, discover)} />
+-            ))}
+-          </Shelf>
+-        ) : (randomLoading ? <ShelfSkeleton n={5} /> : <p className="text-sm" style={{ color: 'var(--m)' }}>Toca Mezclar para traer canciones.</p>)}
+-      </Section>
+-
+-      {/* ===== Canciones y álbumes populares ===== */}
+-      {(popular.length > 0 || (popAlbums || []).length > 0) && (
+-        <section className="space-y-7">
+-          <SectionTitle title="Populares ahora" sub="Los más escuchados del mundo" className="!mb-0" />
+-          {popular.length > 0 && (
+-            <div>
+-              <p className="text-sm font-semibold mb-2" style={{ color: 'var(--m)' }}>Canciones</p>
+-              <Shelf>
+-                {popular.map((t) => (
+-                  <SquareCard key={t.id} art={t.art} title={t.title} sub={t.artist} badge={t.rank ? `#${t.rank}` : undefined} label={`Reproducir ${t.title}`}
+-                    spinning={resolvingId === t.id} onClick={() => playEntry(t)} />
+-                ))}
+-              </Shelf>
+-            </div>
+-          )}
+-          {(popAlbums || []).length > 0 && (
+-            <div>
+-              <p className="text-sm font-semibold mb-2" style={{ color: 'var(--m)' }}>Álbumes</p>
+-              <Shelf>
+-                {popAlbums.map((a) => (
+-                  <SquareCard key={a.ref} art={a.art} title={a.title} sub={a.artist} badge={a.year || undefined} onClick={() => nav(albumPath(a))} />
+-                ))}
+-              </Shelf>
+-            </div>
+-          )}
+-        </section>
+-      )}
+-
+       {/* ===== Categorías ===== */}
+       <Section title="Categorías">
+         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+diff --git a/src/views/music/ui.jsx b/src/views/music/ui.jsx
+index 2fffcb0..6dfac7a 100644
+--- a/src/views/music/ui.jsx
++++ b/src/views/music/ui.jsx
+@@ -9,7 +9,9 @@ export function SectionTitle({ title, sub, action, className = '' }) {
+   return (
+     <div className={`flex items-end justify-between gap-3 mb-3 ${className}`}>
+       <div className="min-w-0">
+-        <h3 className="serif text-[2rem] sm:text-4xl font-semibold leading-none tracking-tight truncate">{title}</h3>
++        <h3 className="serif text-[2rem] sm:text-4xl font-semibold leading-none tracking-tight truncate">
++          {(() => { const w = String(title).trim().split(/\s+/); if (w.length < 2) return title; const last = w.pop(); return <>{w.join(' ')} <span style={{ color: 'var(--a)' }}>{last}</span></>; })()}
++        </h3>
+         {/* Sin subtítulo descriptivo: las secciones solo llevan el título (el parámetro `sub` se ignora a propósito) */}
+       </div>
+       {action}
+@@ -154,7 +156,7 @@ export function SongRow({ n, art, title, sub, duration, explicit, active, playin
+         <Marquee className="text-[13px]" style={{ color: 'var(--m)' }}>{sub}</Marquee>
+       </button>
+       {extra}
+-      {!!duration && <span className="text-[13px] tabular-nums shrink-0 hidden sm:block w-10 text-right" style={{ color: 'var(--m)' }}>{fmtTime(duration)}</span>}
++      {!!duration && <span className="text-[13px] tabular-nums shrink-0 w-10 text-right" style={{ color: 'var(--m)' }}>{fmtTime(duration)}</span>}
+       {onMenu && (
+         <button className="ico-btn shrink-0 !min-w-[40px] !min-h-[40px] srow-act keep" onClick={onMenu} aria-label={`Opciones de ${title}`} style={{ color: 'var(--m)' }}><MoreVertical size={19} /></button>
+       )}
